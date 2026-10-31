@@ -15,6 +15,7 @@ create index on public.transactions (user_id, tx_date desc);
 create table public.user_settings (
   user_id uuid primary key default auth.uid() references auth.users(id) on delete cascade,
   budget bigint not null default 0,
+  daily_limit bigint not null default 0,
   theme text not null default 'system',
   updated_at timestamptz not null default now()
 );
@@ -37,5 +38,5 @@ create policy "own settings" on public.user_settings
 
 -- Fungsi ringan untuk keepalive (dipanggil workflow GitHub agar proyek gratis tidak di-pause)
 create or replace function public.ping() returns text
-language sql stable as $$ select 'ok'::text $$;
+language sql stable set search_path = '' as $$ select 'ok'::text $$;
 grant execute on function public.ping() to anon, authenticated;

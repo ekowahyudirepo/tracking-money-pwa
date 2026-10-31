@@ -8,6 +8,7 @@ diisi di `config.js`, ada login dan data tersinkron di semua perangkat.
 - Tambah, ubah, hapus transaksi (nominal dengan pemisah ribuan, kategori, tanggal, catatan)
 - Pindah antar bulan, pencarian, filter pemasukan/pengeluaran, riwayat per hari
 - Anggaran bulanan dengan progress bar
+- Batas pengeluaran harian: kartu "hari ini", peringatan saat mengisi transaksi, penanda hari yang melewati batas
 - Statistik: ringkasan, grafik 6 bulan, pengeluaran per kategori
 - Ekspor dan impor CSV (format sama dengan versi Android), bagikan ringkasan bulanan
 - Tema terang/gelap/ikut sistem, bisa offline

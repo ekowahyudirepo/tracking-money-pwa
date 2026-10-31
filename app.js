@@ -63,7 +63,7 @@ function uuid() {
 }
 
 let transactions = store.load('kk.tx', []);
-let settings = Object.assign({ budget: 0, theme: 'system' }, store.load('kk.settings', {}));
+let settings = Object.assign({ budget: 0, dailyLimit: 0, theme: 'system' }, store.load('kk.settings', {}));
 const ui = { tab: 'home', month: currentMonthIndex(), filter: 'all', query: '' };
 let draft = null;
 let deferredInstall = null;
@@ -218,7 +218,10 @@ function listHtml(items) {
   });
   return groups.map((g) => {
     const net = g.items.reduce((a, t) => a + (t.type === IN ? t.amount : -t.amount), 0);
-    return '<div class="day"><span>' + esc(dayLabel(g.items[0].date)) + '</span>' +
+    const lim = settings.dailyLimit || 0;
+    const overDay = lim > 0 && g.items.filter((t) => t.type === OUT).reduce((a, t) => a + t.amount, 0) > lim;
+    return '<div class="day"><span>' + esc(dayLabel(g.items[0].date)) +
+      (overDay ? ' <b class="out">• Melebihi batas</b>' : '') + '</span>' +
       '<span class="' + (net >= 0 ? 'in' : 'out') + '">' + (net >= 0 ? '+' : '-') + fmtCompact(Math.abs(net)) + '</span></div>' +
       g.items.map((t) =>
         '<button class="row" data-action="edit" data-id="' + esc(t.id) + '">' +
@@ -234,6 +237,7 @@ function renderHome() {
   const items = monthItems();
   return monthSelector() +
     summaryHtml(sum(items, IN), sum(items, OUT)) +
+    dailyCard() +
     '<div class="toolbar">' +
     '<div class="search"><input id="q" type="search" placeholder="Cari kategori atau catatan" value="' + esc(ui.query) + '" autocomplete="off"></div>' +
     '<div class="chips">' +
@@ -267,12 +271,21 @@ function renderStats() {
   const biggest = expenses.reduce((m, t) => (!m || t.amount > m.amount ? t : m), null);
   const rate = totalIn > 0 ? Math.round(((totalIn - totalOut) / totalIn) * 100) + '%' : '-';
 
+  const dailyLim = settings.dailyLimit || 0;
+  let overLine = '';
+  if (dailyLim > 0) {
+    const perDay = {};
+    expenses.forEach((t) => { const k = dayKey(t.date); perDay[k] = (perDay[k] || 0) + t.amount; });
+    const overDays = Object.keys(perDay).filter((k) => perDay[k] > dailyLim).length;
+    overLine = '<div class="line"><span>Hari melebihi batas harian</span><span>' + overDays + ' hari</span></div>';
+  }
+
   return monthSelector() + '<div class="stack">' +
     '<div class="card"><h2>Ringkasan ' + monthLabel(ui.month) + '</h2>' +
     '<div class="line"><span>Jumlah transaksi</span><span>' + items.length + '</span></div>' +
     '<div class="line"><span>Rata-rata pengeluaran per hari</span><span>' + fmtRp(avg) + '</span></div>' +
     '<div class="line"><span>Pengeluaran terbesar</span><span>' + (biggest ? esc(biggest.category) + ' • ' + fmtRp(biggest.amount) : '-') + '</span></div>' +
-    '<div class="line"><span>Rasio tabungan</span><span>' + rate + '</span></div></div>' +
+    '<div class="line"><span>Rasio tabungan</span><span>' + rate + '</span></div>' + overLine + '</div>' +
 
     '<div class="card"><h2>6 bulan terakhir</h2>' +
     '<div class="legend"><span><i style="background:var(--in)"></i>Pemasukan</span><span><i style="background:var(--out)"></i>Pengeluaran</span></div>' +
@@ -298,6 +311,7 @@ function renderSettings() {
     '<label class="field"><span>Anggaran</span><div class="money">Rp&nbsp;<input id="budget-input" data-money inputmode="numeric" autocomplete="off" value="' +
     (settings.budget > 0 ? settings.budget.toLocaleString('id-ID') : '') + '"></div></label>' +
     '<div style="margin-top:12px"><button class="btn" data-action="save-budget">Simpan anggaran</button></div></div>' +
+    dailyLimitCard() +
 
     '<div class="card"><h2>Tampilan</h2><div class="chips">' +
     chip('Ikut sistem', 'theme', 'system', settings.theme === 'system') +
@@ -372,6 +386,7 @@ function renderSheet() {
     chip('Pemasukan', 'sheet-type', IN, d.type === IN) +
     '</div>' +
     '<label class="field"><span>Nominal</span><div class="money">Rp&nbsp;<input id="f-amount" data-money inputmode="numeric" autocomplete="off" placeholder="0" value="' + esc(d.amountText) + '"></div></label>' +
+    '<div id="f-limit" class="limit-hint small"></div>' +
     '<div class="field"><span>Kategori</span><div class="chips">' +
     CATEGORIES[d.type].map((c) => chip(esc(c), 'sheet-cat', esc(c), c === d.category)).join('') +
     '</div></div>' +
@@ -382,6 +397,7 @@ function renderSheet() {
     '<button class="btn outline" data-action="sheet-cancel">Batal</button>' +
     '<button class="btn" id="f-save" data-action="sheet-save"' + (parseMoney(d.amountText) > 0 ? '' : ' disabled') + '>Simpan</button>' +
     '</div>';
+  updateLimitHint();
 }
 
 function saveSheet() {
@@ -404,9 +420,11 @@ function saveSheet() {
   saveTx();
   queueUpsert(savedId);
   ui.month = monthIndexOf(dateMs);
+  const lim = settings.dailyLimit || 0;
+  const overLimit = d.type === OUT && lim > 0 && dayExpense(dayKey(dateMs), null) > lim;
   closeSheet();
   render();
-  toast('Transaksi disimpan');
+  toast(overLimit ? 'Tersimpan. Perhatian: pengeluaran hari itu melebihi batas harian ' + fmtRp(lim) : 'Transaksi disimpan');
 }
 
 /* ---------- Input nominal ---------- */
@@ -588,6 +606,17 @@ document.addEventListener('click', (e) => {
         toast('Semua data dihapus');
       }
       break;
+    case 'save-daily':
+      settings.dailyLimit = parseMoney($('#daily-input').value);
+      saveSettings();
+      toast(settings.dailyLimit > 0 ? 'Batas harian disimpan' : 'Batas harian dinonaktifkan');
+      render();
+      break;
+    case 'use-suggest': {
+      const input = $('#daily-input');
+      if (input) input.value = Number(value).toLocaleString('id-ID');
+      break;
+    }
     case 'auth-toggle':
       authState.mode = authState.mode === 'login' ? 'signup' : 'login';
       authState.msg = '';
@@ -623,11 +652,13 @@ document.addEventListener('input', (e) => {
       draft.amountText = el.value;
       const btn = $('#f-save');
       if (btn) btn.disabled = !(parseMoney(el.value) > 0);
+      updateLimitHint();
     }
   } else if (el.id === 'f-note' && draft) {
     draft.note = el.value;
   } else if (el.id === 'f-date' && draft) {
     draft.date = el.value;
+    updateLimitHint();
   } else if (el.id === 'a-email') {
     authState.email = el.value;
   } else if (el.id === 'q') {
@@ -783,12 +814,20 @@ async function flushOutbox() {
     outbox.settings = false;
     saveOutbox();
     try {
-      chk(await sb.from('user_settings').upsert({
+      const payload = {
         user_id: user.id,
         budget: settings.budget || 0,
+        daily_limit: settings.dailyLimit || 0,
         theme: settings.theme || 'system',
         updated_at: new Date().toISOString()
-      }, { onConflict: 'user_id' }));
+      };
+      let res = await sb.from('user_settings').upsert(payload, { onConflict: 'user_id' });
+      if (res.error && res.error.code === 'PGRST204') {
+        // Kolom daily_limit belum ada di database: simpan pengaturan lainnya saja
+        delete payload.daily_limit;
+        res = await sb.from('user_settings').upsert(payload, { onConflict: 'user_id' });
+      }
+      chk(res);
     } catch (e) {
       outbox.settings = true;
       saveOutbox();
@@ -825,10 +864,11 @@ async function pullAll() {
   if (!outbox.settings) {
     if (srv.length) {
       settings.budget = Number(srv[0].budget) || 0;
+      if ('daily_limit' in srv[0]) settings.dailyLimit = Number(srv[0].daily_limit) || 0;
       settings.theme = srv[0].theme || 'system';
       store.save('kk.settings', settings);
       applyTheme();
-    } else if (settings.budget > 0 || settings.theme !== 'system') {
+    } else if (settings.budget > 0 || settings.dailyLimit > 0 || settings.theme !== 'system') {
       outbox.settings = true; // belum ada di server: kirim pengaturan lokal
       saveOutbox();
     }
@@ -967,7 +1007,7 @@ function afterLogin(u) {
     transactions = [];
     saveTx();
     outbox = { items: {}, wipe: false, settings: false };
-    settings = { budget: 0, theme: 'system' };
+    settings = { budget: 0, dailyLimit: 0, theme: 'system' };
     store.save('kk.settings', settings);
   }
   user = { id: u.id, email: u.email || '' };
@@ -978,7 +1018,7 @@ function afterLogin(u) {
   if (!prev) {
     // Data yang sudah ada sebelum punya akun ikut naik ke akun ini
     transactions.forEach((t) => { outbox.items[t.id] = 'upsert'; });
-    if (settings.budget > 0 || settings.theme !== 'system') outbox.settings = true;
+    if (settings.budget > 0 || settings.dailyLimit > 0 || settings.theme !== 'system') outbox.settings = true;
   }
   saveOutbox();
   authState.msg = '';
@@ -998,7 +1038,7 @@ function forceLogin() {
 
 function wipeLocal() {
   transactions = [];
-  settings = { budget: 0, theme: 'system' };
+  settings = { budget: 0, dailyLimit: 0, theme: 'system' };
   outbox = { items: {}, wipe: false, settings: false };
   user = null;
   localMode = false;
@@ -1073,6 +1113,59 @@ function initCloud() {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && Date.now() - sync.last > 20000) syncNow(false);
   });
+}
+
+/* ---------- Batas pengeluaran harian ---------- */
+function dayExpense(key, excludeId) {
+  return transactions
+    .filter((t) => t.type === OUT && t.id !== excludeId && dayKey(t.date) === key)
+    .reduce((a, t) => a + t.amount, 0);
+}
+
+// Kartu "hari ini" di Beranda (hanya saat melihat bulan berjalan)
+function dailyCard() {
+  const lim = settings.dailyLimit || 0;
+  if (!lim || ui.month !== currentMonthIndex()) return '';
+  const spent = dayExpense(dayKey(Date.now()), null);
+  const ratio = spent / lim;
+  const cls = ratio >= 1 ? 'over' : ratio >= 0.8 ? 'warn' : '';
+  return '<div class="card" style="margin-top:12px">' +
+    '<div class="row-between"><span class="lbl">Pengeluaran hari ini</span><span class="lbl">' + fmtCompact(spent) + ' / ' + fmtCompact(lim) + '</span></div>' +
+    '<div class="progress"><div class="' + cls + '" style="width:' + Math.min(100, Math.max(0, ratio * 100)) + '%"></div></div>' +
+    '<div class="small" style="margin-top:6px;font-weight:600">' +
+    (spent <= lim ? 'Sisa batas hari ini ' + fmtRp(lim - spent) : 'Melebihi batas hari ini ' + fmtRp(spent - lim)) +
+    '</div></div>';
+}
+
+// Petunjuk di form transaksi: sisa batas atau peringatan melebihi
+function updateLimitHint() {
+  const el = document.getElementById('f-limit');
+  if (!el || !draft) return;
+  const lim = settings.dailyLimit || 0;
+  if (!lim || draft.type !== OUT || !draft.date) { el.className = 'limit-hint small'; el.textContent = ''; return; }
+  const total = dayExpense(dayKey(fromDateInput(draft.date)), draft.id) + parseMoney(draft.amountText);
+  if (total > lim) {
+    el.className = 'limit-hint small out';
+    el.textContent = 'Melebihi batas harian: total hari itu jadi ' + fmtRp(total) + ' (batas ' + fmtRp(lim) + ')';
+  } else {
+    el.className = 'limit-hint small muted';
+    el.textContent = 'Sisa batas hari itu setelah ini: ' + fmtRp(lim - total);
+  }
+}
+
+function dailyLimitCard() {
+  const suggest = settings.budget > 0
+    ? Math.floor(settings.budget / daysInMonth(currentMonthIndex()) / 1000) * 1000
+    : 0;
+  return '<div class="card"><h2>Batas pengeluaran harian</h2>' +
+    '<div class="muted small">Kamu diberi peringatan saat total pengeluaran satu hari melewati batas ini. Transaksi tetap bisa disimpan. Kosongkan atau isi 0 untuk menonaktifkan.</div>' +
+    '<label class="field"><span>Batas per hari</span><div class="money">Rp&nbsp;<input id="daily-input" data-money inputmode="numeric" autocomplete="off" value="' +
+    (settings.dailyLimit > 0 ? settings.dailyLimit.toLocaleString('id-ID') : '') + '"></div></label>' +
+    (suggest > 0
+      ? '<div class="small muted" style="margin-top:8px">Saran dari anggaran bulanan: ' + fmtRp(suggest) +
+        ' per hari. <button class="btn text" style="padding:0 4px" data-action="use-suggest" data-value="' + suggest + '">Pakai saran</button></div>'
+      : '') +
+    '<div style="margin-top:12px"><button class="btn" data-action="save-daily">Simpan batas harian</button></div></div>';
 }
 
 /* ---------- Mulai ---------- */

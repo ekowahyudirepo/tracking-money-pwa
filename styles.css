@@ -247,3 +247,8 @@ svg.i { width: 24px; height: 24px; display: block; }
 .auth-msg.ok { background: var(--pc); color: var(--on-pc); }
 .auth-links { display: flex; flex-direction: column; align-items: stretch; margin-top: 12px; }
 .auth-links .btn.text { text-align: center; }
+
+/* ---------- Batas harian ---------- */
+.row-between { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.limit-hint { margin-top: 6px; min-height: 1.2em; }
+.limit-hint.out { font-weight: 600; }
