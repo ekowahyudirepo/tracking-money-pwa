@@ -1,6 +1,7 @@
 // Service worker: aplikasi bisa dibuka offline.
-// Strategi: tampilkan dari cache dulu, lalu perbarui cache di latar belakang.
-const CACHE = 'keuanganku-v3';
+// Strategi: ambil versi terbaru dari jaringan (maks. 4 detik); jika offline atau lambat,
+// pakai salinan di cache. Dengan begitu pembaruan langsung terlihat saat online.
+const CACHE = 'keuanganku-v4';
 const ASSETS = [
   './',
   'index.html',
@@ -13,9 +14,15 @@ const ASSETS = [
   'icons/icon-512.png',
   'icons/apple-touch-icon.png'
 ];
+const NETWORK_TIMEOUT = 4000;
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS)));
+  // cache: 'reload' = jangan pakai salinan HTTP cache yang mungkin sudah usang
+  event.waitUntil(
+    caches.open(CACHE).then((cache) =>
+      Promise.all(ASSETS.map((url) => cache.add(new Request(url, { cache: 'reload' }))))
+    )
+  );
   self.skipWaiting();
 });
 
@@ -27,20 +34,26 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+async function networkFirst(req) {
+  const cache = await caches.open(CACHE);
+  const fromNetwork = fetch(req.url, { cache: 'no-cache' }).then((res) => {
+    if (res && res.ok) cache.put(req, res.clone());
+    return res;
+  });
+  try {
+    return await Promise.race([
+      fromNetwork,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), NETWORK_TIMEOUT))
+    ]);
+  } catch (e) {
+    const cached = await cache.match(req, { ignoreSearch: true });
+    if (cached) return cached;
+    return fromNetwork; // belum ada salinan: tunggu jaringan
+  }
+}
+
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) return;
-
-  event.respondWith(
-    caches.open(CACHE).then(async (cache) => {
-      const cached = await cache.match(req, { ignoreSearch: true });
-      const network = fetch(req)
-        .then((res) => {
-          if (res && res.ok) cache.put(req, res.clone());
-          return res;
-        })
-        .catch(() => cached);
-      return cached || network;
-    })
-  );
+  event.respondWith(networkFirst(req));
 });
