@@ -47,14 +47,46 @@ const store = {
   }
 };
 
+/* ---------- Konfigurasi cloud (Supabase) ---------- */
+const CFG = window.KK_CONFIG || {};
+const CLOUD = !!(CFG.SUPABASE_URL && CFG.SUPABASE_KEY && window.supabase && window.supabase.createClient);
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function uuid() {
+  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  const b = new Uint8Array(16);
+  for (let i = 0; i < 16; i++) b[i] = Math.floor(Math.random() * 256);
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const h = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+  return h.slice(0, 8) + '-' + h.slice(8, 12) + '-' + h.slice(12, 16) + '-' + h.slice(16, 20) + '-' + h.slice(20);
+}
+
 let transactions = store.load('kk.tx', []);
 let settings = Object.assign({ budget: 0, theme: 'system' }, store.load('kk.settings', {}));
 const ui = { tab: 'home', month: currentMonthIndex(), filter: 'all', query: '' };
 let draft = null;
 let deferredInstall = null;
 
+// Antrean perubahan yang belum terkirim ke server: items[id] = 'upsert' | 'delete'
+let outbox = Object.assign({ items: {}, wipe: false, settings: false }, store.load('kk.outbox', {}));
+let user = store.load('kk.user', null); // { id, email } bila sudah login
+let localMode = store.load('kk.localmode', false); // true = sengaja dipakai tanpa akun
+const sync = { busy: false, again: false, last: 0, error: '' };
+let sb = null;
+
+// Migrasi: id lama (bukan UUID) diganti UUID supaya cocok dengan database
+if (transactions.some((t) => !UUID_RE.test(t.id))) {
+  transactions.forEach((t) => { if (!UUID_RE.test(t.id)) t.id = uuid(); });
+  store.save('kk.tx', transactions);
+}
+
 const saveTx = () => store.save('kk.tx', transactions);
-const saveSettings = () => store.save('kk.settings', settings);
+const saveSettings = () => {
+  const ok = store.save('kk.settings', settings);
+  queueSettings();
+  return ok;
+};
 
 /* ---------- Helper ---------- */
 const $ = (sel) => document.querySelector(sel);
@@ -106,7 +138,7 @@ function fromDateInput(str) {
   return new Date(y, m - 1, d, 12, 0, 0).getTime();
 }
 
-const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+const newId = () => uuid();
 const sorted = (list) => list.slice().sort((a, b) => b.date - a.date || (b.created || 0) - (a.created || 0));
 const monthItems = () => transactions.filter((t) => monthIndexOf(t.date) === ui.month);
 
@@ -260,6 +292,7 @@ function renderStats() {
 
 function renderSettings() {
   return '<h1>Pengaturan</h1><div class="stack">' +
+    accountCard() +
     '<div class="card"><h2>Anggaran bulanan</h2>' +
     '<div class="muted small">Batas pengeluaran per bulan. Kosongkan atau isi 0 untuk menonaktifkan.</div>' +
     '<label class="field"><span>Anggaran</span><div class="money">Rp&nbsp;<input id="budget-input" data-money inputmode="numeric" autocomplete="off" value="' +
@@ -287,13 +320,23 @@ function renderSettings() {
     (deferredInstall ? '<div style="margin-top:12px"><button class="btn" data-action="install">Pasang aplikasi</button></div>' : '') +
     '</div>' +
 
-    '<div class="card"><h2>Tentang</h2><div>KeuanganKu versi web 1.0</div>' +
-    '<div class="muted small">Data hanya disimpan di browser perangkat ini dan tidak dikirim ke server mana pun.</div></div>' +
+    '<div class="card"><h2>Tentang</h2><div>KeuanganKu versi web 1.1</div>' +
+    '<div class="muted small">' + (CLOUD && user
+      ? 'Data disimpan di akun kamu dan disalin ke perangkat ini supaya bisa dipakai offline.'
+      : 'Data hanya disimpan di browser perangkat ini dan tidak dikirim ke server mana pun.') + '</div></div>' +
     '</div>';
 }
 
 function render() {
   const app = $('#app');
+  const navEl = document.querySelector('.nav');
+  if (CLOUD && !user && !localMode) {
+    app.innerHTML = renderAuth();
+    $('#fab').hidden = true;
+    navEl.hidden = true;
+    return;
+  }
+  navEl.hidden = false;
   app.innerHTML = ui.tab === 'home' ? renderHome() : ui.tab === 'stats' ? renderStats() : renderSettings();
   $('#fab').hidden = ui.tab !== 'home';
   $('#fab').innerHTML = icon('plus');
@@ -349,13 +392,17 @@ function saveSheet() {
     ? (transactions.find((t) => t.id === d.id) || {}).date || fromDateInput(d.date)
     : fromDateInput(d.date);
   const data = { type: d.type, amount, category: d.category, note: d.note.trim(), date: dateMs };
+  let savedId = d.id;
   if (d.id) {
     const t = transactions.find((x) => x.id === d.id);
     if (t) Object.assign(t, data);
+    else transactions.push(Object.assign({ id: d.id, created: Date.now() }, data));
   } else {
-    transactions.push(Object.assign({ id: newId(), created: Date.now() }, data));
+    savedId = newId();
+    transactions.push(Object.assign({ id: savedId, created: Date.now() }, data));
   }
   saveTx();
+  queueUpsert(savedId);
   ui.month = monthIndexOf(dateMs);
   closeSheet();
   render();
@@ -448,6 +495,7 @@ function importCsv(file) {
       if (existing.has(keyOf(t))) return;
       existing.add(keyOf(t));
       transactions.push(t);
+      queueUpsert(t.id);
       added++;
     });
     saveTx();
@@ -516,6 +564,7 @@ document.addEventListener('click', (e) => {
       if (draft && draft.id && confirm('Hapus transaksi ini?')) {
         transactions = transactions.filter((t) => t.id !== draft.id);
         saveTx();
+        queueDelete(draft.id);
         closeSheet();
         render();
         toast('Transaksi dihapus');
@@ -534,10 +583,29 @@ document.addEventListener('click', (e) => {
       if (confirm('Hapus SEMUA transaksi? Tindakan ini tidak bisa dibatalkan.')) {
         transactions = [];
         saveTx();
+        queueWipe();
         render();
         toast('Semua data dihapus');
       }
       break;
+    case 'auth-toggle':
+      authState.mode = authState.mode === 'login' ? 'signup' : 'login';
+      authState.msg = '';
+      render();
+      break;
+    case 'auth-local':
+      localMode = true;
+      store.save('kk.localmode', true);
+      render();
+      break;
+    case 'show-login':
+      localMode = false;
+      store.save('kk.localmode', false);
+      authState.msg = '';
+      render();
+      break;
+    case 'sync-now': syncNow(true); break;
+    case 'logout': logout(); break;
     case 'install':
       if (deferredInstall) {
         deferredInstall.prompt();
@@ -560,6 +628,8 @@ document.addEventListener('input', (e) => {
     draft.note = el.value;
   } else if (el.id === 'f-date' && draft) {
     draft.date = el.value;
+  } else if (el.id === 'a-email') {
+    authState.email = el.value;
   } else if (el.id === 'q') {
     ui.query = el.value;
     $('#list').innerHTML = listHtml(monthItems());
@@ -588,9 +658,428 @@ if (window.matchMedia) {
   if (mq.addEventListener) mq.addEventListener('change', onChange);
 }
 
+/* =========================================================
+   Sinkronisasi (Supabase), offline-first.
+   Data lokal selalu jadi sumber tampilan. Setiap perubahan masuk
+   antrean (outbox) lalu dikirim saat online. Tanpa konfigurasi
+   (config.js kosong) aplikasi berjalan dalam mode lokal.
+   ========================================================= */
+const authState = { mode: 'login', email: '', msg: '', ok: false, busy: false };
+let flushTimer = null;
+let needsRender = false;
+
+function chk(res) {
+  if (res.error) {
+    const e = new Error(res.error.message || 'Permintaan gagal');
+    e.code = res.error.code;
+    e.status = res.status;
+    throw e;
+  }
+  return res.data;
+}
+
+function toRow(t) {
+  return {
+    id: t.id,
+    user_id: user.id,
+    type: t.type,
+    amount: t.amount,
+    category: t.category,
+    note: t.note || '',
+    tx_date: toDateInput(t.date),
+    created_at: new Date(t.created || t.date).toISOString(),
+    updated_at: new Date().toISOString()
+  };
+}
+
+function fromRow(r) {
+  return {
+    id: r.id,
+    type: r.type,
+    amount: Number(r.amount),
+    category: r.category,
+    note: r.note || '',
+    date: fromDateInput(r.tx_date),
+    created: Date.parse(r.created_at) || Date.now()
+  };
+}
+
+const saveOutbox = () => store.save('kk.outbox', outbox);
+const pendingCount = () => Object.keys(outbox.items).length + (outbox.wipe ? 1 : 0) + (outbox.settings ? 1 : 0);
+
+function scheduleFlush() {
+  clearTimeout(flushTimer);
+  flushTimer = setTimeout(() => syncNow(false), 400);
+}
+function queueUpsert(id) {
+  if (!CLOUD || !user) return;
+  outbox.items[id] = 'upsert';
+  saveOutbox();
+  renderSyncBadge();
+  scheduleFlush();
+}
+function queueDelete(id) {
+  if (!CLOUD || !user) return;
+  outbox.items[id] = 'delete';
+  saveOutbox();
+  renderSyncBadge();
+  scheduleFlush();
+}
+function queueWipe() {
+  if (!CLOUD || !user) return;
+  outbox.items = {};
+  outbox.wipe = true;
+  saveOutbox();
+  renderSyncBadge();
+  scheduleFlush();
+}
+function queueSettings() {
+  if (!CLOUD || !user) return;
+  outbox.settings = true;
+  saveOutbox();
+  renderSyncBadge();
+  scheduleFlush();
+}
+
+async function flushOutbox() {
+  if (outbox.wipe) {
+    chk(await sb.from('transactions').delete().not('id', 'is', null));
+    outbox.wipe = false;
+    saveOutbox();
+  }
+
+  const opIds = (op) => Object.keys(outbox.items).filter((id) => outbox.items[id] === op);
+  const takeOut = (ids) => { ids.forEach((id) => { delete outbox.items[id]; }); saveOutbox(); };
+  const putBack = (ids, op) => { ids.forEach((id) => { if (!(id in outbox.items)) outbox.items[id] = op; }); saveOutbox(); };
+
+  const upIds = opIds('upsert');
+  if (upIds.length) {
+    takeOut(upIds);
+    try {
+      const rows = upIds.map((id) => transactions.find((t) => t.id === id)).filter(Boolean).map(toRow);
+      for (let i = 0; i < rows.length; i += 200) {
+        chk(await sb.from('transactions').upsert(rows.slice(i, i + 200), { onConflict: 'id' }));
+      }
+    } catch (e) {
+      putBack(upIds, 'upsert');
+      throw e;
+    }
+  }
+
+  const delIds = opIds('delete');
+  if (delIds.length) {
+    takeOut(delIds);
+    try {
+      for (let i = 0; i < delIds.length; i += 100) {
+        chk(await sb.from('transactions').delete().in('id', delIds.slice(i, i + 100)));
+      }
+    } catch (e) {
+      putBack(delIds, 'delete');
+      throw e;
+    }
+  }
+
+  if (outbox.settings) {
+    outbox.settings = false;
+    saveOutbox();
+    try {
+      chk(await sb.from('user_settings').upsert({
+        user_id: user.id,
+        budget: settings.budget || 0,
+        theme: settings.theme || 'system',
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'user_id' }));
+    } catch (e) {
+      outbox.settings = true;
+      saveOutbox();
+      throw e;
+    }
+  }
+}
+
+// Tarik data dari server. Perubahan lokal yang belum terkirim menang atas data server.
+async function pullAll() {
+  const before = JSON.stringify([transactions, settings]);
+  const remote = [];
+  for (let from = 0; ; from += 1000) {
+    const rows = chk(await sb.from('transactions').select('*')
+      .order('tx_date', { ascending: false }).order('id').range(from, from + 999));
+    remote.push(...rows);
+    if (rows.length < 1000) break;
+  }
+
+  const pending = outbox.items;
+  const local = new Map(transactions.map((t) => [t.id, t]));
+  const seen = new Set();
+  const merged = [];
+  remote.forEach((r) => {
+    seen.add(r.id);
+    if (pending[r.id] === 'delete') return;
+    merged.push(pending[r.id] === 'upsert' && local.has(r.id) ? local.get(r.id) : fromRow(r));
+  });
+  local.forEach((t, id) => { if (!seen.has(id) && pending[id] === 'upsert') merged.push(t); });
+  transactions = merged;
+  saveTx();
+
+  const srv = chk(await sb.from('user_settings').select('*').limit(1));
+  if (!outbox.settings) {
+    if (srv.length) {
+      settings.budget = Number(srv[0].budget) || 0;
+      settings.theme = srv[0].theme || 'system';
+      store.save('kk.settings', settings);
+      applyTheme();
+    } else if (settings.budget > 0 || settings.theme !== 'system') {
+      outbox.settings = true; // belum ada di server: kirim pengaturan lokal
+      saveOutbox();
+    }
+  }
+  return before !== JSON.stringify([transactions, settings]);
+}
+
+async function syncNow(manual) {
+  if (!CLOUD || !user || !sb) return;
+  if (sync.busy) { sync.again = true; return; }
+  if (navigator.onLine === false) {
+    sync.error = 'offline';
+    renderSyncBadge();
+    if (manual) toast('Sedang offline. Perubahan akan dikirim saat online.');
+    return;
+  }
+  sync.busy = true;
+  sync.error = '';
+  renderSyncBadge();
+  try {
+    const { data, error } = await sb.auth.getSession();
+    if (error) throw error;
+    if (!data.session) { forceLogin(); return; }
+    await flushOutbox();
+    const changed = await pullAll();
+    if (outbox.settings) await flushOutbox();
+    sync.last = Date.now();
+    if (changed) softRender();
+    if (manual) toast('Sinkronisasi selesai');
+  } catch (e) {
+    sync.error = describeError(e);
+    if (e && e.status === 401) forceLogin();
+    else if (manual) toast('Gagal sinkron: ' + sync.error);
+  } finally {
+    sync.busy = false;
+    renderSyncBadge();
+    if (sync.again) { sync.again = false; scheduleFlush(); }
+  }
+}
+
+function describeError(e) {
+  const m = String((e && e.message) || e || '');
+  if (/failed to fetch|networkerror|load failed|network request/i.test(m)) return 'tidak ada koneksi';
+  if (e && e.code === '42P01') return 'tabel belum dibuat (jalankan SQL di Supabase)';
+  if (e && e.code === '42501') return 'izin ditolak (cek grant dan policy di SQL)';
+  return m || 'kesalahan tidak dikenal';
+}
+
+// Render ulang tanpa mengganggu pengguna yang sedang mengetik
+function softRender() {
+  const a = document.activeElement;
+  if (a && a.matches && a.matches('#app input')) { needsRender = true; return; }
+  needsRender = false;
+  render();
+}
+document.addEventListener('focusout', () => setTimeout(() => { if (needsRender) softRender(); }, 150));
+
+/* ---------- Akun ---------- */
+function authMessage(e) {
+  const m = String((e && e.message) || e || '').toLowerCase();
+  if (/failed to fetch|network|load failed/.test(m)) return 'Tidak ada koneksi internet. Coba lagi saat online.';
+  if (m.includes('invalid login')) return 'Email atau kata sandi salah.';
+  if (m.includes('already registered') || m.includes('already been registered')) return 'Email ini sudah terdaftar. Silakan masuk.';
+  if (m.includes('password should be') || m.includes('at least')) return 'Kata sandi minimal 6 karakter.';
+  if (m.includes('not confirmed')) return 'Email belum dikonfirmasi. Cek kotak masuk kamu.';
+  if (m.includes('rate limit') || m.includes('too many')) return 'Terlalu banyak percobaan. Tunggu beberapa menit lalu coba lagi.';
+  if (m.includes('invalid') && m.includes('email')) return 'Format email tidak valid.';
+  if (m.includes('signups not allowed')) return 'Pendaftaran dinonaktifkan di Supabase.';
+  return 'Gagal: ' + ((e && e.message) || 'terjadi kesalahan');
+}
+
+function renderAuth() {
+  const signup = authState.mode === 'signup';
+  return '<div class="auth"><h1>KeuanganKu</h1>' +
+    '<p class="muted">' + (signup
+      ? 'Buat akun untuk menyimpan data dan memakainya di semua perangkat.'
+      : 'Masuk untuk menyinkronkan data kamu di semua perangkat.') + '</p>' +
+    '<form id="auth-form" novalidate>' +
+    '<label class="field"><span>Email</span><input id="a-email" type="email" autocomplete="email" inputmode="email" autocapitalize="none" value="' + esc(authState.email) + '"></label>' +
+    '<label class="field"><span>Kata sandi</span><input id="a-pass" type="password" autocomplete="' + (signup ? 'new-password' : 'current-password') + '"></label>' +
+    (authState.msg ? '<div class="auth-msg ' + (authState.ok ? 'ok' : 'err') + '" role="alert">' + esc(authState.msg) + '</div>' : '') +
+    '<div style="margin-top:16px"><button class="btn block" type="submit" id="a-submit">' + (signup ? 'Daftar' : 'Masuk') + '</button></div>' +
+    '</form>' +
+    '<div class="auth-links">' +
+    '<button class="btn text" data-action="auth-toggle">' + (signup ? 'Sudah punya akun? Masuk' : 'Belum punya akun? Daftar') + '</button>' +
+    '<button class="btn text" data-action="auth-local">Lanjut tanpa akun (data hanya di perangkat ini)</button>' +
+    '</div></div>';
+}
+
+document.addEventListener('submit', async (e) => {
+  if (e.target.id !== 'auth-form') return;
+  e.preventDefault();
+  if (authState.busy || !sb) return;
+  const email = $('#a-email').value.trim();
+  const pass = $('#a-pass').value;
+  authState.email = email;
+  authState.ok = false;
+  if (!/^\S+@\S+\.\S+$/.test(email)) { authState.msg = 'Format email tidak valid.'; render(); return; }
+  if (pass.length < 6) { authState.msg = 'Kata sandi minimal 6 karakter.'; render(); return; }
+  authState.busy = true;
+  const btn = $('#a-submit');
+  btn.disabled = true;
+  btn.textContent = 'Memproses...';
+  try {
+    const result = await doAuth(authState.mode, email, pass);
+    authState.busy = false;
+    if (result === 'confirm') {
+      authState.mode = 'login';
+      authState.msg = 'Pendaftaran berhasil. Cek email untuk konfirmasi, lalu masuk.';
+      authState.ok = true;
+      render();
+    } else {
+      authState.msg = '';
+    }
+  } catch (err) {
+    authState.busy = false;
+    authState.msg = authMessage(err);
+    render();
+  }
+});
+
+async function doAuth(mode, email, password) {
+  const res = mode === 'signup'
+    ? await sb.auth.signUp({ email, password })
+    : await sb.auth.signInWithPassword({ email, password });
+  if (res.error) throw res.error;
+  if (!res.data.session) return 'confirm';
+  afterLogin(res.data.session.user);
+  return 'ok';
+}
+
+function afterLogin(u) {
+  const prev = store.load('kk.lastuser', null);
+  if (prev && prev !== u.id) {
+    // Data lokal milik akun lain: jangan dicampur
+    transactions = [];
+    saveTx();
+    outbox = { items: {}, wipe: false, settings: false };
+    settings = { budget: 0, theme: 'system' };
+    store.save('kk.settings', settings);
+  }
+  user = { id: u.id, email: u.email || '' };
+  store.save('kk.user', user);
+  store.save('kk.lastuser', u.id);
+  localMode = false;
+  store.save('kk.localmode', false);
+  if (!prev) {
+    // Data yang sudah ada sebelum punya akun ikut naik ke akun ini
+    transactions.forEach((t) => { outbox.items[t.id] = 'upsert'; });
+    if (settings.budget > 0 || settings.theme !== 'system') outbox.settings = true;
+  }
+  saveOutbox();
+  authState.msg = '';
+  applyTheme();
+  render();
+  syncNow(true);
+}
+
+function forceLogin() {
+  user = null;
+  store.save('kk.user', null);
+  authState.mode = 'login';
+  authState.msg = 'Sesi berakhir. Silakan masuk lagi.';
+  authState.ok = false;
+  render();
+}
+
+function wipeLocal() {
+  transactions = [];
+  settings = { budget: 0, theme: 'system' };
+  outbox = { items: {}, wipe: false, settings: false };
+  user = null;
+  localMode = false;
+  ['kk.tx', 'kk.settings', 'kk.outbox', 'kk.user', 'kk.lastuser', 'kk.localmode', 'kk.auth', 'kk.auth-code-verifier']
+    .forEach((k) => { try { localStorage.removeItem(k); } catch (e) { /* abaikan */ } });
+  ui.tab = 'home';
+  authState.mode = 'login';
+  authState.msg = '';
+  applyTheme();
+  render();
+}
+
+async function logout() {
+  if (!confirm('Keluar dari akun? Data di perangkat ini akan dihapus. Data tetap aman di akun kamu dan muncul lagi saat masuk.')) return;
+  if (pendingCount() > 0) {
+    try {
+      await flushOutbox();
+    } catch (e) {
+      if (!confirm('Ada perubahan yang belum terkirim ke akun dan akan hilang jika keluar sekarang. Tetap keluar?')) return;
+    }
+  }
+  user = null; // supaya event SIGNED_OUT tidak dianggap sesi berakhir
+  try { await sb.auth.signOut(); } catch (e) { /* abaikan */ }
+  wipeLocal();
+}
+
+function accountCard() {
+  if (!CLOUD) {
+    return '<div class="card"><h2>Akun dan sinkronisasi</h2><div class="muted small">Sinkronisasi antar perangkat belum diaktifkan. Data tersimpan hanya di perangkat ini.</div></div>';
+  }
+  if (!user) {
+    return '<div class="card"><h2>Akun dan sinkronisasi</h2>' +
+      '<div class="muted small">Kamu memakai mode lokal. Masuk untuk menyimpan data di akun dan memakainya di perangkat lain. Data yang sudah ada ikut tersimpan.</div>' +
+      '<div style="margin-top:12px"><button class="btn" data-action="show-login">Masuk atau daftar</button></div></div>';
+  }
+  return '<div class="card"><h2>Akun dan sinkronisasi</h2>' +
+    '<div class="line"><span>Akun</span><span>' + esc(user.email) + '</span></div>' +
+    '<div class="line"><span>Status</span><span id="sync-status">' + esc(syncText()) + '</span></div>' +
+    '<div class="btns" style="margin-top:12px">' +
+    '<button class="btn block" data-action="sync-now">Sinkronkan sekarang</button>' +
+    '<button class="btn outline block" data-action="logout">Keluar</button></div></div>';
+}
+
+function syncText() {
+  const n = pendingCount();
+  const tail = n ? ' (' + n + ' menunggu)' : '';
+  if (sync.busy) return 'Menyinkronkan...';
+  if (navigator.onLine === false || sync.error === 'offline') return 'Offline' + tail;
+  if (sync.error) return 'Gagal: ' + sync.error + tail;
+  if (n) return n + ' perubahan menunggu';
+  return sync.last
+    ? 'Tersinkron ' + new Date(sync.last).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+    : 'Belum disinkronkan';
+}
+
+function renderSyncBadge() {
+  const el = document.getElementById('sync-status');
+  if (el) el.textContent = syncText();
+}
+
+function initCloud() {
+  if (!CLOUD) return;
+  sb = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_KEY, {
+    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false, storageKey: 'kk.auth' }
+  });
+  sb.auth.onAuthStateChange((event) => {
+    // Jangan memanggil sb.* langsung di dalam callback ini
+    if (event === 'SIGNED_OUT' && user) setTimeout(forceLogin, 0);
+  });
+  window.addEventListener('online', () => { sync.error = ''; syncNow(false); });
+  window.addEventListener('offline', renderSyncBadge);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && Date.now() - sync.last > 20000) syncNow(false);
+  });
+}
+
 /* ---------- Mulai ---------- */
 applyTheme();
+initCloud();
 render();
+if (CLOUD && user) syncNow(false);
 
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
 if ('serviceWorker' in navigator) {

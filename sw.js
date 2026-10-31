@@ -1,11 +1,13 @@
 // Service worker: aplikasi bisa dibuka offline.
 // Strategi: tampilkan dari cache dulu, lalu perbarui cache di latar belakang.
-const CACHE = 'keuanganku-v1';
+const CACHE = 'keuanganku-v2';
 const ASSETS = [
   './',
   'index.html',
   'styles.css',
   'app.js',
+  'config.js',
+  'vendor/supabase.js',
   'manifest.webmanifest',
   'icons/icon-192.png',
   'icons/icon-512.png',

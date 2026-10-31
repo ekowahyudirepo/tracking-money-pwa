@@ -237,3 +237,13 @@ svg.i { width: 24px; height: 24px; display: block; }
 .toast[hidden] { display: none; }
 
 .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; }
+
+/* ---------- Login ---------- */
+.auth { max-width: 420px; margin: 8vh auto 0; }
+.auth h1 { font-size: 1.75rem; margin-bottom: 4px; }
+.auth p { margin: 0 0 8px; }
+.auth-msg { margin-top: 12px; padding: 10px 12px; border-radius: 12px; font-size: 0.9rem; }
+.auth-msg.err { background: var(--card); color: var(--error); }
+.auth-msg.ok { background: var(--pc); color: var(--on-pc); }
+.auth-links { display: flex; flex-direction: column; align-items: stretch; margin-top: 12px; }
+.auth-links .btn.text { text-align: center; }
