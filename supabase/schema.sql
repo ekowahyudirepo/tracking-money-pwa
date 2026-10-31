@@ -16,6 +16,7 @@ create table public.user_settings (
   user_id uuid primary key default auth.uid() references auth.users(id) on delete cascade,
   budget bigint not null default 0,
   daily_limit bigint not null default 0,
+  custom_categories jsonb not null default '{}'::jsonb,
   theme text not null default 'system',
   updated_at timestamptz not null default now()
 );

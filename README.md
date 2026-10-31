@@ -18,6 +18,9 @@ tetap berjalan tanpa internet, dan (opsional) menyinkronkan data ke semua perang
     <td align="center"><img src="docs/screenshots/pengaturan.png" width="220" alt="Pengaturan"><br><sub>Pengaturan: akun, anggaran, batas harian</sub></td>
     <td align="center"><img src="docs/screenshots/mode-gelap.png" width="220" alt="Mode gelap"><br><sub>Mode gelap</sub></td>
   </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/kategori-kustom.png" width="220" alt="Kategori kustom"><br><sub>Kategori kustom</sub></td>
+  </tr>
 </table>
 
 Tangkapan layar memakai data contoh.
@@ -28,6 +31,7 @@ Tangkapan layar memakai data contoh.
 - **Beranda:** pindah antar bulan, pencarian, filter pemasukan/pengeluaran, riwayat dikelompokkan per hari.
 - **Anggaran bulanan** dengan progress bar yang berubah warna saat mendekati batas.
 - **Batas pengeluaran harian:** kartu "hari ini", petunjuk sisa batas saat mengisi transaksi, peringatan saat melewati batas, dan penanda hari yang melewati batas. Ada saran batas dari anggaran bulanan.
+- **Kategori kustom:** tambah dan hapus kategori sendiri (pengeluaran dan pemasukan) di Pengaturan, maksimal 20 per jenis dan 20 karakter per nama. Tampil di form transaksi sebelum "Lainnya", ikut statistik, dan ikut tersinkron. Menghapus kategori tidak mengubah transaksi lama.
 - **Statistik:** ringkasan bulan, rasio tabungan, jumlah hari melewati batas, grafik 6 bulan, dan pengeluaran per kategori.
 - **Data:** ekspor dan impor CSV (format sama dengan versi Android), bagikan ringkasan bulanan.
 - **Tema:** terang, gelap, atau ikut sistem.
@@ -53,6 +57,14 @@ Aplikasi berjalan dalam mode lokal selama `config.js` kosong. Untuk mengaktifkan
 2. **Authentication > Sign In / Providers > Email:** matikan "Confirm email" (opsional, untuk pemakaian pribadi).
 3. Isi `config.js` dengan **Project URL** dan kunci **anon/publishable**.
 4. Commit dan push. Aplikasi akan menampilkan layar login.
+
+**Database sudah dibuat sebelumnya?** Fitur kategori kustom butuh kolom `custom_categories`. Jalankan di SQL Editor:
+
+```sql
+alter table public.user_settings add column if not exists custom_categories jsonb not null default '{}'::jsonb;
+```
+
+Tanpa kolom ini aplikasi tetap jalan, hanya kategori kustom tidak tersinkron antar perangkat.
 
 **Cara kerja:** offline-first. Aplikasi selalu membaca dari data di perangkat. Setiap perubahan masuk ke antrean
 dan dikirim saat online, lalu data terbaru ditarik dari server. Perubahan yang belum terkirim tidak tertimpa.

@@ -7,10 +7,13 @@
 const IN = 'INCOME';
 const OUT = 'EXPENSE';
 
-const CATEGORIES = {
+const BASE_CATEGORIES = {
   EXPENSE: ['Makan', 'Transport', 'Belanja', 'Tagihan', 'Hiburan', 'Kesehatan', 'Pendidikan', 'Keluarga', 'Lainnya'],
   INCOME: ['Gaji', 'Bonus', 'Usaha', 'Investasi', 'Lainnya']
 };
+
+const MAX_CUSTOM = 20;     // maksimal kategori kustom per jenis
+const MAX_CAT_LEN = 20;    // maksimal panjang nama kategori
 
 const MONTHS = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
 const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
@@ -63,7 +66,33 @@ function uuid() {
 }
 
 let transactions = store.load('kk.tx', []);
-let settings = Object.assign({ budget: 0, dailyLimit: 0, theme: 'system' }, store.load('kk.settings', {}));
+const defaultSettings = () => ({ budget: 0, dailyLimit: 0, theme: 'system', customCats: { EXPENSE: [], INCOME: [] } });
+let settings = normalizeSettings(Object.assign(defaultSettings(), store.load('kk.settings', {})));
+
+function cleanCatList(list) {
+  const out = [];
+  (Array.isArray(list) ? list : []).forEach((n) => {
+    const name = String(n || '').trim().slice(0, MAX_CAT_LEN);
+    if (name && !out.some((x) => x.toLowerCase() === name.toLowerCase())) out.push(name);
+  });
+  return out.slice(0, MAX_CUSTOM);
+}
+function normalizeSettings(st) {
+  const c = st.customCats || {};
+  st.customCats = { EXPENSE: cleanCatList(c.EXPENSE), INCOME: cleanCatList(c.INCOME) };
+  return st;
+}
+const hasCustomCats = () => settings.customCats.EXPENSE.length + settings.customCats.INCOME.length > 0;
+const hasSettings = () => settings.budget > 0 || settings.dailyLimit > 0 || settings.theme !== 'system' || hasCustomCats();
+
+// Daftar kategori bawaan + kustom. "Lainnya" selalu di paling akhir.
+function categoriesFor(type, extra) {
+  const base = BASE_CATEGORIES[type].filter((c) => c !== 'Lainnya');
+  const all = base.concat(settings.customCats[type]);
+  if (extra && extra !== 'Lainnya' && !all.some((c) => c.toLowerCase() === extra.toLowerCase())) all.push(extra);
+  all.push('Lainnya');
+  return all;
+}
 const ui = { tab: 'home', month: currentMonthIndex(), filter: 'all', query: '' };
 let draft = null;
 let deferredInstall = null;
@@ -312,6 +341,7 @@ function renderSettings() {
     (settings.budget > 0 ? settings.budget.toLocaleString('id-ID') : '') + '"></div></label>' +
     '<div style="margin-top:12px"><button class="btn" data-action="save-budget">Simpan anggaran</button></div></div>' +
     dailyLimitCard() +
+    categoryCard() +
 
     '<div class="card"><h2>Tampilan</h2><div class="chips">' +
     chip('Ikut sistem', 'theme', 'system', settings.theme === 'system') +
@@ -365,7 +395,7 @@ function render() {
 function openSheet(tx) {
   draft = tx
     ? { id: tx.id, type: tx.type, category: tx.category, note: tx.note || '', date: toDateInput(tx.date), origDate: toDateInput(tx.date), amountText: tx.amount.toLocaleString('id-ID') }
-    : { id: null, type: OUT, category: CATEGORIES.EXPENSE[0], note: '', date: toDateInput(Date.now()), origDate: null, amountText: '' };
+    : { id: null, type: OUT, category: categoriesFor(OUT)[0], note: '', date: toDateInput(Date.now()), origDate: null, amountText: '' };
   renderSheet();
   $('#overlay').hidden = false;
   if (!tx) setTimeout(() => { const a = $('#f-amount'); if (a) a.focus(); }, 50);
@@ -388,7 +418,7 @@ function renderSheet() {
     '<label class="field"><span>Nominal</span><div class="money">Rp&nbsp;<input id="f-amount" data-money inputmode="numeric" autocomplete="off" placeholder="0" value="' + esc(d.amountText) + '"></div></label>' +
     '<div id="f-limit" class="limit-hint small"></div>' +
     '<div class="field"><span>Kategori</span><div class="chips">' +
-    CATEGORIES[d.type].map((c) => chip(esc(c), 'sheet-cat', esc(c), c === d.category)).join('') +
+    categoriesFor(d.type, d.category).map((c) => chip(esc(c), 'sheet-cat', esc(c), c === d.category)).join('') +
     '</div></div>' +
     '<label class="field"><span>Tanggal</span><input id="f-date" type="date" value="' + esc(d.date) + '"></label>' +
     '<label class="field"><span>Catatan (opsional)</span><input id="f-note" type="text" autocomplete="off" value="' + esc(d.note) + '"></label>' +
@@ -571,7 +601,7 @@ document.addEventListener('click', (e) => {
     case 'sheet-type':
       if (draft.type !== value) {
         draft.type = value;
-        draft.category = CATEGORIES[value][0];
+        draft.category = categoriesFor(value)[0];
         renderSheet();
       }
       break;
@@ -606,6 +636,35 @@ document.addEventListener('click', (e) => {
         toast('Semua data dihapus');
       }
       break;
+    case 'add-cat': {
+      const type = el.dataset.type === IN ? IN : OUT;
+      const input = $('#newcat-' + type);
+      const name = (input.value || '').trim().replace(/\s+/g, ' ');
+      if (!name) { toast('Tulis nama kategori dulu'); break; }
+      if (name.length > MAX_CAT_LEN) { toast('Maksimal ' + MAX_CAT_LEN + ' karakter'); break; }
+      if (categoriesFor(type).some((c) => c.toLowerCase() === name.toLowerCase())) { toast('Kategori sudah ada'); break; }
+      if (settings.customCats[type].length >= MAX_CUSTOM) { toast('Maksimal ' + MAX_CUSTOM + ' kategori kustom'); break; }
+      settings.customCats[type].push(name);
+      saveSettings();
+      render();
+      toast('Kategori ditambahkan');
+      break;
+    }
+    case 'del-cat': {
+      const type = el.dataset.type === IN ? IN : OUT;
+      const name = el.dataset.value;
+      const used = transactions.filter((t) => t.type === type && t.category === name).length;
+      const msg = used
+        ? 'Hapus kategori "' + name + '"? ' + used + ' transaksi lama tetap memakai nama ini, hanya tidak muncul lagi sebagai pilihan.'
+        : 'Hapus kategori "' + name + '"?';
+      if (confirm(msg)) {
+        settings.customCats[type] = settings.customCats[type].filter((c) => c !== name);
+        saveSettings();
+        render();
+        toast('Kategori dihapus');
+      }
+      break;
+    }
     case 'save-daily':
       settings.dailyLimit = parseMoney($('#daily-input').value);
       saveSettings();
@@ -818,13 +877,15 @@ async function flushOutbox() {
         user_id: user.id,
         budget: settings.budget || 0,
         daily_limit: settings.dailyLimit || 0,
+        custom_categories: settings.customCats,
         theme: settings.theme || 'system',
         updated_at: new Date().toISOString()
       };
       let res = await sb.from('user_settings').upsert(payload, { onConflict: 'user_id' });
       if (res.error && res.error.code === 'PGRST204') {
-        // Kolom daily_limit belum ada di database: simpan pengaturan lainnya saja
+        // Kolom baru belum ada di database: simpan pengaturan lainnya saja
         delete payload.daily_limit;
+        delete payload.custom_categories;
         res = await sb.from('user_settings').upsert(payload, { onConflict: 'user_id' });
       }
       chk(res);
@@ -865,10 +926,13 @@ async function pullAll() {
     if (srv.length) {
       settings.budget = Number(srv[0].budget) || 0;
       if ('daily_limit' in srv[0]) settings.dailyLimit = Number(srv[0].daily_limit) || 0;
+      if (srv[0].custom_categories && typeof srv[0].custom_categories === 'object') {
+        settings.customCats = normalizeSettings({ customCats: srv[0].custom_categories }).customCats;
+      }
       settings.theme = srv[0].theme || 'system';
       store.save('kk.settings', settings);
       applyTheme();
-    } else if (settings.budget > 0 || settings.dailyLimit > 0 || settings.theme !== 'system') {
+    } else if (hasSettings()) {
       outbox.settings = true; // belum ada di server: kirim pengaturan lokal
       saveOutbox();
     }
@@ -1007,7 +1071,7 @@ function afterLogin(u) {
     transactions = [];
     saveTx();
     outbox = { items: {}, wipe: false, settings: false };
-    settings = { budget: 0, dailyLimit: 0, theme: 'system' };
+    settings = defaultSettings();
     store.save('kk.settings', settings);
   }
   user = { id: u.id, email: u.email || '' };
@@ -1018,7 +1082,7 @@ function afterLogin(u) {
   if (!prev) {
     // Data yang sudah ada sebelum punya akun ikut naik ke akun ini
     transactions.forEach((t) => { outbox.items[t.id] = 'upsert'; });
-    if (settings.budget > 0 || settings.dailyLimit > 0 || settings.theme !== 'system') outbox.settings = true;
+    if (hasSettings()) outbox.settings = true;
   }
   saveOutbox();
   authState.msg = '';
@@ -1038,7 +1102,7 @@ function forceLogin() {
 
 function wipeLocal() {
   transactions = [];
-  settings = { budget: 0, dailyLimit: 0, theme: 'system' };
+  settings = defaultSettings();
   outbox = { items: {}, wipe: false, settings: false };
   user = null;
   localMode = false;
@@ -1166,6 +1230,22 @@ function dailyLimitCard() {
         ' per hari. <button class="btn text" style="padding:0 4px" data-action="use-suggest" data-value="' + suggest + '">Pakai saran</button></div>'
       : '') +
     '<div style="margin-top:12px"><button class="btn" data-action="save-daily">Simpan batas harian</button></div></div>';
+}
+
+function categoryCard() {
+  const block = (type, title) => {
+    const list = settings.customCats[type];
+    return '<div class="field"><span>' + title + '</span>' +
+      (list.length
+        ? '<div class="chips">' + list.map((c) =>
+            '<span class="chip tag">' + esc(c) + '<button class="x" aria-label="Hapus kategori ' + esc(c) + '" data-action="del-cat" data-type="' + type + '" data-value="' + esc(c) + '">&times;</button></span>').join('') + '</div>'
+        : '<div class="small muted">Belum ada kategori kustom.</div>') +
+      '<div class="add-cat"><input class="input" id="newcat-' + type + '" maxlength="' + MAX_CAT_LEN + '" placeholder="Nama kategori baru" autocomplete="off">' +
+      '<button class="btn" data-action="add-cat" data-type="' + type + '">Tambah</button></div></div>';
+  };
+  return '<div class="card"><h2>Kategori kustom</h2>' +
+    '<div class="muted small">Tambahkan kategori sendiri selain bawaan. Kategori muncul di form transaksi dan ikut tersinkron.</div>' +
+    block(OUT, 'Pengeluaran') + block(IN, 'Pemasukan') + '</div>';
 }
 
 /* ---------- Mulai ---------- */

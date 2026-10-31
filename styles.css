@@ -252,3 +252,12 @@ svg.i { width: 24px; height: 24px; display: block; }
 .row-between { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
 .limit-hint { margin-top: 6px; min-height: 1.2em; }
 .limit-hint.out { font-weight: 600; }
+
+/* ---------- Kategori kustom ---------- */
+.chip.tag { display: inline-flex; align-items: center; gap: 4px; padding-right: 4px; }
+.chip.tag .x {
+  border: 0; background: none; width: 26px; height: 26px; border-radius: 13px;
+  font-size: 1.1rem; line-height: 1; color: var(--muted);
+}
+.add-cat { display: flex; gap: 8px; margin-top: 10px; }
+.add-cat .input { flex: 1; min-width: 0; }
