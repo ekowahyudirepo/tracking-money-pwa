@@ -34,3 +34,8 @@ create policy "own settings" on public.user_settings
   for all to authenticated
   using (user_id = (select auth.uid()))
   with check (user_id = (select auth.uid()));
+
+-- Fungsi ringan untuk keepalive (dipanggil workflow GitHub agar proyek gratis tidak di-pause)
+create or replace function public.ping() returns text
+language sql stable as $$ select 'ok'::text $$;
+grant execute on function public.ping() to anon, authenticated;
