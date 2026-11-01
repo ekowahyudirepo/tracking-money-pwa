@@ -19,6 +19,7 @@ tetap berjalan tanpa internet, dan (opsional) menyinkronkan data ke semua perang
     <td align="center"><img src="docs/screenshots/mode-gelap.png" width="220" alt="Mode gelap"><br><sub>Mode gelap</sub></td>
   </tr>
   <tr>
+    <td align="center"><img src="docs/screenshots/harian.png" width="220" alt="Tampilan harian"><br><sub>Tampilan harian dengan saldo awal dan akhir</sub></td>
     <td align="center"><img src="docs/screenshots/kategori-kustom.png" width="220" alt="Kategori kustom"><br><sub>Kategori kustom</sub></td>
   </tr>
 </table>
@@ -28,7 +29,8 @@ Tangkapan layar memakai data contoh.
 ## Fitur
 
 - **Transaksi:** tambah, ubah, hapus. Nominal dengan pemisah ribuan, kategori, tanggal, dan catatan.
-- **Beranda:** pindah antar bulan, pencarian, filter pemasukan/pengeluaran, riwayat dikelompokkan per hari.
+- **Beranda:** pilih tampilan **Bulanan** atau **Harian**, pindah antar bulan atau antar hari, pencarian, filter pemasukan/pengeluaran, riwayat dikelompokkan per hari. Pilihan tampilan diingat.
+- **Saldo berlanjut (tidak reset tiap bulan):** saldo akhir sebuah bulan (atau hari) otomatis menjadi saldo awal periode berikutnya. Isi **Saldo awal** di Pengaturan untuk uang yang sudah Anda punya sebelum mulai mencatat. Transaksi lama tidak diubah, hanya cara menghitung saldonya.
 - **Anggaran bulanan** dengan progress bar yang berubah warna saat mendekati batas.
 - **Batas pengeluaran harian:** kartu "hari ini", petunjuk sisa batas saat mengisi transaksi, peringatan saat melewati batas, dan penanda hari yang melewati batas. Ada saran batas dari anggaran bulanan.
 - **Kategori kustom:** tambah dan hapus kategori sendiri (pengeluaran dan pemasukan) di Pengaturan, maksimal 20 per jenis dan 20 karakter per nama. Tampil di form transaksi sebelum "Lainnya", ikut statistik, dan ikut tersinkron. Menghapus kategori tidak mengubah transaksi lama.
@@ -58,13 +60,14 @@ Aplikasi berjalan dalam mode lokal selama `config.js` kosong. Untuk mengaktifkan
 3. Isi `config.js` dengan **Project URL** dan kunci **anon/publishable**.
 4. Commit dan push. Aplikasi akan menampilkan layar login.
 
-**Database sudah dibuat sebelumnya?** Fitur kategori kustom butuh kolom `custom_categories`. Jalankan di SQL Editor:
+**Database sudah dibuat sebelumnya?** Kategori kustom dan saldo awal butuh dua kolom tambahan. Jalankan di SQL Editor:
 
 ```sql
 alter table public.user_settings add column if not exists custom_categories jsonb not null default '{}'::jsonb;
+alter table public.user_settings add column if not exists opening_balance bigint not null default 0;
 ```
 
-Tanpa kolom ini aplikasi tetap jalan, hanya kategori kustom tidak tersinkron antar perangkat.
+Tanpa kolom ini aplikasi tetap jalan, hanya kategori kustom dan saldo awal tidak tersinkron antar perangkat.
 
 **Cara kerja:** offline-first. Aplikasi selalu membaca dari data di perangkat. Setiap perubahan masuk ke antrean
 dan dikirim saat online, lalu data terbaru ditarik dari server. Perubahan yang belum terkirim tidak tertimpa.

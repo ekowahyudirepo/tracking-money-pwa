@@ -261,3 +261,9 @@ svg.i { width: 24px; height: 24px; display: block; }
 }
 .add-cat { display: flex; gap: 8px; margin-top: 10px; }
 .add-cat .input { flex: 1; min-width: 0; }
+
+/* ---------- Tampilan bulanan / harian, saldo awal ---------- */
+.view-toggle { margin: 0 0 8px; justify-content: center; }
+.view-toggle .chip { min-width: 96px; text-align: center; }
+.month .label.day-label { font-size: 1.05rem; }
+.card.hero .opening { margin-top: 6px; opacity: 0.85; }

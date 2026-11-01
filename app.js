@@ -66,7 +66,7 @@ function uuid() {
 }
 
 let transactions = store.load('kk.tx', []);
-const defaultSettings = () => ({ budget: 0, dailyLimit: 0, theme: 'system', customCats: { EXPENSE: [], INCOME: [] } });
+const defaultSettings = () => ({ budget: 0, dailyLimit: 0, openingBalance: 0, theme: 'system', customCats: { EXPENSE: [], INCOME: [] } });
 let settings = normalizeSettings(Object.assign(defaultSettings(), store.load('kk.settings', {})));
 
 function cleanCatList(list) {
@@ -78,12 +78,13 @@ function cleanCatList(list) {
   return out.slice(0, MAX_CUSTOM);
 }
 function normalizeSettings(st) {
+  st.openingBalance = Math.max(0, Number(st.openingBalance) || 0);
   const c = st.customCats || {};
   st.customCats = { EXPENSE: cleanCatList(c.EXPENSE), INCOME: cleanCatList(c.INCOME) };
   return st;
 }
 const hasCustomCats = () => settings.customCats.EXPENSE.length + settings.customCats.INCOME.length > 0;
-const hasSettings = () => settings.budget > 0 || settings.dailyLimit > 0 || settings.theme !== 'system' || hasCustomCats();
+const hasSettings = () => settings.budget > 0 || settings.openingBalance > 0 || settings.dailyLimit > 0 || settings.theme !== 'system' || hasCustomCats();
 
 // Daftar kategori bawaan + kustom. "Lainnya" selalu di paling akhir.
 function categoriesFor(type, extra) {
@@ -93,7 +94,7 @@ function categoriesFor(type, extra) {
   all.push('Lainnya');
   return all;
 }
-const ui = { tab: 'home', month: currentMonthIndex(), filter: 'all', query: '' };
+const ui = { tab: 'home', view: store.load('kk.view', 'month') === 'day' ? 'day' : 'month', month: currentMonthIndex(), day: Date.now(), filter: 'all', query: '' };
 let draft = null;
 let deferredInstall = null;
 
@@ -170,6 +171,19 @@ function fromDateInput(str) {
 const newId = () => uuid();
 const sorted = (list) => list.slice().sort((a, b) => b.date - a.date || (b.created || 0) - (a.created || 0));
 const monthItems = () => transactions.filter((t) => monthIndexOf(t.date) === ui.month);
+const dayItems = () => transactions.filter((t) => dayKey(t.date) === dayKey(ui.day));
+const viewItems = () => (ui.view === 'day' ? dayItems() : monthItems());
+
+// Saldo berlanjut: saldo awal (pengaturan) + semua transaksi sebelum periode yang dilihat
+const netOf = (t) => (t.type === IN ? t.amount : -t.amount);
+const balanceBeforeMonth = (idx) => (settings.openingBalance || 0) +
+  transactions.filter((t) => monthIndexOf(t.date) < idx).reduce((a, t) => a + netOf(t), 0);
+const balanceBeforeDay = (key) => (settings.openingBalance || 0) +
+  transactions.filter((t) => dayKey(t.date) < key).reduce((a, t) => a + netOf(t), 0);
+function shiftDay(ms, n) {
+  const d = new Date(ms);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n, 12, 0, 0).getTime();
+}
 
 let toastTimer = null;
 function toast(msg) {
@@ -202,25 +216,50 @@ function monthSelector() {
     '</div>';
 }
 
-function summaryHtml(income, expense) {
-  const budget = settings.budget || 0;
-  let budgetHtml = '';
-  if (budget > 0) {
-    const ratio = expense / budget;
-    const cls = ratio >= 1 ? 'over' : ratio >= 0.8 ? 'warn' : '';
-    budgetHtml =
-      '<div class="budget">' +
-      '<div class="row-between"><span>Anggaran pengeluaran</span><span>' + fmtCompact(expense) + ' / ' + fmtCompact(budget) + '</span></div>' +
-      '<div class="progress"><div class="' + cls + '" style="width:' + Math.min(100, Math.max(0, ratio * 100)) + '%"></div></div>' +
-      '<div class="small" style="margin-top:4px;font-weight:600">' +
-      (expense <= budget ? 'Sisa ' + fmtRp(budget - expense) : 'Melebihi anggaran ' + fmtRp(expense - budget)) +
-      '</div></div>';
+function viewToggle() {
+  return '<div class="chips view-toggle">' +
+    chip('Bulanan', 'set-view', 'month', ui.view === 'month') +
+    chip('Harian', 'set-view', 'day', ui.view === 'day') + '</div>';
+}
+
+function daySelector() {
+  const isToday = dayKey(ui.day) === dayKey(Date.now());
+  const label = new Date(ui.day).toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
+  return '<div class="month">' +
+    '<button class="icon-btn" data-action="prev-day" aria-label="Hari sebelumnya">' + icon('left') + '</button>' +
+    '<button class="label day-label" data-action="this-day">' + esc(label) +
+    (isToday ? '<small>Hari ini</small>' : '<small>Ketuk untuk ke hari ini</small>') + '</button>' +
+    '<button class="icon-btn" data-action="next-day" aria-label="Hari berikutnya">' + icon('right') + '</button>' +
+    '</div>';
+}
+
+function summaryHtml(opening, income, expense) {
+  const day = ui.view === 'day';
+  const closing = opening + income - expense;
+  const period = day ? 'hari ini' : 'bulan ini';
+  let extra = '';
+  if (!day) {
+    const budget = settings.budget || 0;
+    if (budget > 0) {
+      const ratio = expense / budget;
+      const cls = ratio >= 1 ? 'over' : ratio >= 0.8 ? 'warn' : '';
+      extra =
+        '<div class="budget">' +
+        '<div class="row-between"><span>Anggaran pengeluaran</span><span>' + fmtCompact(expense) + ' / ' + fmtCompact(budget) + '</span></div>' +
+        '<div class="progress"><div class="' + cls + '" style="width:' + Math.min(100, Math.max(0, ratio * 100)) + '%"></div></div>' +
+        '<div class="small" style="margin-top:4px;font-weight:600">' +
+        (expense <= budget ? 'Sisa ' + fmtRp(budget - expense) : 'Melebihi anggaran ' + fmtRp(expense - budget)) +
+        '</div></div>';
+    }
   }
-  return '<div class="card hero"><div class="lbl">Saldo ' + monthLabel(ui.month) + '</div>' +
-    '<div class="big">' + fmtRp(income - expense) + '</div>' + budgetHtml + '</div>' +
+  const title = day ? 'Saldo akhir ' + new Date(ui.day).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })
+                    : 'Saldo akhir ' + monthLabel(ui.month);
+  return '<div class="card hero"><div class="lbl">' + esc(title) + '</div>' +
+    '<div class="big">' + fmtRp(closing) + '</div>' +
+    '<div class="small opening">Saldo awal ' + (day ? 'hari' : 'bulan') + ': ' + fmtRp(opening) + '</div>' + extra + '</div>' +
     '<div class="grid2">' +
-    '<div class="card"><div class="lbl">Pemasukan</div><div class="val in">' + fmtRp(income) + '</div></div>' +
-    '<div class="card"><div class="lbl">Pengeluaran</div><div class="val out">' + fmtRp(expense) + '</div></div>' +
+    '<div class="card"><div class="lbl">Pemasukan ' + period + '</div><div class="val in">' + fmtRp(income) + '</div></div>' +
+    '<div class="card"><div class="lbl">Pengeluaran ' + period + '</div><div class="val out">' + fmtRp(expense) + '</div></div>' +
     '</div>';
 }
 
@@ -236,7 +275,7 @@ function listHtml(items) {
     return typeOk && queryOk;
   });
   if (!shown.length) {
-    return '<div class="empty">' + (items.length ? 'Tidak ada transaksi yang cocok.' : 'Belum ada transaksi di bulan ini.\nTekan + untuk menambah.') + '</div>';
+    return '<div class="empty">' + (items.length ? 'Tidak ada transaksi yang cocok.' : (ui.view === 'day' ? 'Belum ada transaksi di hari ini.' : 'Belum ada transaksi di bulan ini.') + '\nTekan + untuk menambah.') + '</div>';
   }
   const groups = [];
   shown.forEach((t) => {
@@ -263,9 +302,10 @@ function listHtml(items) {
 }
 
 function renderHome() {
-  const items = monthItems();
-  return monthSelector() +
-    summaryHtml(sum(items, IN), sum(items, OUT)) +
+  const items = viewItems();
+  const opening = ui.view === 'day' ? balanceBeforeDay(dayKey(ui.day)) : balanceBeforeMonth(ui.month);
+  return viewToggle() + (ui.view === 'day' ? daySelector() : monthSelector()) +
+    summaryHtml(opening, sum(items, IN), sum(items, OUT)) +
     dailyCard() +
     '<div class="toolbar">' +
     '<div class="search"><input id="q" type="search" placeholder="Cari kategori atau catatan" value="' + esc(ui.query) + '" autocomplete="off"></div>' +
@@ -311,6 +351,8 @@ function renderStats() {
 
   return monthSelector() + '<div class="stack">' +
     '<div class="card"><h2>Ringkasan ' + monthLabel(ui.month) + '</h2>' +
+    '<div class="line"><span>Saldo awal bulan</span><span>' + fmtRp(balanceBeforeMonth(ui.month)) + '</span></div>' +
+    '<div class="line"><span>Saldo akhir bulan</span><span>' + fmtRp(balanceBeforeMonth(ui.month) + totalIn - totalOut) + '</span></div>' +
     '<div class="line"><span>Jumlah transaksi</span><span>' + items.length + '</span></div>' +
     '<div class="line"><span>Rata-rata pengeluaran per hari</span><span>' + fmtRp(avg) + '</span></div>' +
     '<div class="line"><span>Pengeluaran terbesar</span><span>' + (biggest ? esc(biggest.category) + ' • ' + fmtRp(biggest.amount) : '-') + '</span></div>' +
@@ -335,6 +377,11 @@ function renderStats() {
 function renderSettings() {
   return '<h1>Pengaturan</h1><div class="stack">' +
     accountCard() +
+    '<div class="card"><h2>Saldo awal</h2>' +
+    '<div class="muted small">Uang yang sudah kamu punya sebelum mulai mencatat. Saldo tidak direset tiap bulan: saldo akhir sebuah bulan menjadi saldo awal bulan berikutnya.</div>' +
+    '<label class="field"><span>Saldo awal</span><div class="money">Rp&nbsp;<input id="opening-input" data-money inputmode="numeric" autocomplete="off" value="' +
+    (settings.openingBalance > 0 ? settings.openingBalance.toLocaleString('id-ID') : '') + '"></div></label>' +
+    '<div style="margin-top:12px"><button class="btn" data-action="save-opening">Simpan saldo awal</button></div></div>' +
     '<div class="card"><h2>Anggaran bulanan</h2>' +
     '<div class="muted small">Batas pengeluaran per bulan. Kosongkan atau isi 0 untuk menonaktifkan.</div>' +
     '<label class="field"><span>Anggaran</span><div class="money">Rp&nbsp;<input id="budget-input" data-money inputmode="numeric" autocomplete="off" value="' +
@@ -450,6 +497,7 @@ function saveSheet() {
   saveTx();
   queueUpsert(savedId);
   ui.month = monthIndexOf(dateMs);
+  ui.day = dateMs;
   const lim = settings.dailyLimit || 0;
   const overLimit = d.type === OUT && lim > 0 && dayExpense(dayKey(dateMs), null) > lim;
   closeSheet();
@@ -561,7 +609,7 @@ function summaryText() {
   const byCat = {};
   items.filter((t) => t.type === OUT).forEach((t) => { byCat[t.category] = (byCat[t.category] || 0) + t.amount; });
   const cats = Object.keys(byCat).map((k) => [k, byCat[k]]).sort((a, b) => b[1] - a[1]);
-  let text = 'Ringkasan keuangan ' + monthLabel(ui.month) + '\nPemasukan: ' + fmtRp(inc) + '\nPengeluaran: ' + fmtRp(exp) + '\nSaldo: ' + fmtRp(inc - exp);
+  let text = 'Ringkasan keuangan ' + monthLabel(ui.month) + '\nSaldo awal: ' + fmtRp(balanceBeforeMonth(ui.month)) + '\nPemasukan: ' + fmtRp(inc) + '\nPengeluaran: ' + fmtRp(exp) + '\nSaldo akhir: ' + fmtRp(balanceBeforeMonth(ui.month) + inc - exp);
   if (cats.length) text += '\n\nPengeluaran per kategori:\n' + cats.map(([k, v]) => '- ' + k + ': ' + fmtRp(v)).join('\n');
   return text;
 }
@@ -588,6 +636,27 @@ document.addEventListener('click', (e) => {
 
   switch (action) {
     case 'tab': ui.tab = value; render(); window.scrollTo(0, 0); break;
+    case 'set-view':
+      if (value !== ui.view) {
+        if (value === 'day') {
+          ui.day = ui.month === currentMonthIndex() ? Date.now() : new Date(Math.floor(ui.month / 12), ui.month % 12, 1, 12).getTime();
+        } else {
+          ui.month = monthIndexOf(ui.day);
+        }
+        ui.view = value;
+        store.save('kk.view', value);
+        render();
+      }
+      break;
+    case 'prev-day': ui.day = shiftDay(ui.day, -1); ui.month = monthIndexOf(ui.day); render(); break;
+    case 'next-day': ui.day = shiftDay(ui.day, 1); ui.month = monthIndexOf(ui.day); render(); break;
+    case 'this-day': ui.day = Date.now(); ui.month = currentMonthIndex(); render(); break;
+    case 'save-opening':
+      settings.openingBalance = parseMoney($('#opening-input').value);
+      saveSettings();
+      toast('Saldo awal disimpan');
+      render();
+      break;
     case 'prev-month': ui.month--; render(); break;
     case 'next-month': ui.month++; render(); break;
     case 'this-month': ui.month = currentMonthIndex(); render(); break;
@@ -722,7 +791,7 @@ document.addEventListener('input', (e) => {
     authState.email = el.value;
   } else if (el.id === 'q') {
     ui.query = el.value;
-    $('#list').innerHTML = listHtml(monthItems());
+    $('#list').innerHTML = listHtml(viewItems());
   }
 });
 
@@ -878,6 +947,7 @@ async function flushOutbox() {
         budget: settings.budget || 0,
         daily_limit: settings.dailyLimit || 0,
         custom_categories: settings.customCats,
+        opening_balance: settings.openingBalance || 0,
         theme: settings.theme || 'system',
         updated_at: new Date().toISOString()
       };
@@ -886,6 +956,7 @@ async function flushOutbox() {
         // Kolom baru belum ada di database: simpan pengaturan lainnya saja
         delete payload.daily_limit;
         delete payload.custom_categories;
+        delete payload.opening_balance;
         res = await sb.from('user_settings').upsert(payload, { onConflict: 'user_id' });
       }
       chk(res);
@@ -926,6 +997,7 @@ async function pullAll() {
     if (srv.length) {
       settings.budget = Number(srv[0].budget) || 0;
       if ('daily_limit' in srv[0]) settings.dailyLimit = Number(srv[0].daily_limit) || 0;
+      if ('opening_balance' in srv[0]) settings.openingBalance = Math.max(0, Number(srv[0].opening_balance) || 0);
       if (srv[0].custom_categories && typeof srv[0].custom_categories === 'object') {
         settings.customCats = normalizeSettings({ customCats: srv[0].custom_categories }).customCats;
       }
@@ -1186,18 +1258,22 @@ function dayExpense(key, excludeId) {
     .reduce((a, t) => a + t.amount, 0);
 }
 
-// Kartu "hari ini" di Beranda (hanya saat melihat bulan berjalan)
+// Kartu batas harian di Beranda: tampilan harian = hari yang dipilih; bulanan = hanya bulan berjalan
 function dailyCard() {
   const lim = settings.dailyLimit || 0;
-  if (!lim || ui.month !== currentMonthIndex()) return '';
-  const spent = dayExpense(dayKey(Date.now()), null);
+  const dayView = ui.view === 'day';
+  if (!lim || (!dayView && ui.month !== currentMonthIndex())) return '';
+  const key = dayView ? dayKey(ui.day) : dayKey(Date.now());
+  const isToday = key === dayKey(Date.now());
+  const when = isToday ? 'hari ini' : 'tanggal ' + new Date(dayView ? ui.day : Date.now()).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
+  const spent = dayExpense(key, null);
   const ratio = spent / lim;
   const cls = ratio >= 1 ? 'over' : ratio >= 0.8 ? 'warn' : '';
   return '<div class="card" style="margin-top:12px">' +
-    '<div class="row-between"><span class="lbl">Pengeluaran hari ini</span><span class="lbl">' + fmtCompact(spent) + ' / ' + fmtCompact(lim) + '</span></div>' +
+    '<div class="row-between"><span class="lbl">Pengeluaran ' + when + '</span><span class="lbl">' + fmtCompact(spent) + ' / ' + fmtCompact(lim) + '</span></div>' +
     '<div class="progress"><div class="' + cls + '" style="width:' + Math.min(100, Math.max(0, ratio * 100)) + '%"></div></div>' +
     '<div class="small" style="margin-top:6px;font-weight:600">' +
-    (spent <= lim ? 'Sisa batas hari ini ' + fmtRp(lim - spent) : 'Melebihi batas hari ini ' + fmtRp(spent - lim)) +
+    (spent <= lim ? 'Sisa batas ' + when + ' ' + fmtRp(lim - spent) : 'Melebihi batas ' + when + ' ' + fmtRp(spent - lim)) +
     '</div></div>';
 }
 
