@@ -272,6 +272,31 @@ function summaryHtml(opening, income, expense) {
     '</div>';
 }
 
+// Proyeksi batas harian untuk sisa bulan berjalan (hari ini ikut dihitung)
+function projectionCard(balance, expense) {
+  if (ui.month !== currentMonthIndex()) return '';
+  const now = new Date();
+  const daysLeft = daysInMonth(ui.month) - now.getDate() + 1;
+  const budget = settings.budget || 0;
+  const lim = settings.dailyLimit || 0;
+  const per = (amount) => (amount > 0 ? Math.floor(amount / daysLeft) : 0);
+  const line = (label, amount, note) => {
+    const ok = amount > 0;
+    return '<div class="line proj"><span>' + label + '<small class="proj-note">' + note + '</small></span>' +
+      '<span class="' + (ok ? '' : 'out') + '">' + (ok ? fmtRp(per(amount)) + ' / hari' : 'Tidak tersisa') + '</span></div>';
+  };
+  let rows = '';
+  if (budget > 0) rows += line('Dari sisa anggaran', budget - expense, 'Sisa ' + fmtRp(Math.max(0, budget - expense)));
+  rows += line('Dari saldo saat ini', balance, 'Saldo ' + fmtRp(balance));
+  const hint = lim > 0
+    ? '<div class="small muted" style="margin-top:8px">Batas harian yang kamu atur: ' + fmtRp(lim) + ' per hari.</div>'
+    : '';
+  return '<div class="card" style="margin-top:12px"><h2>Batas harian untuk sisa bulan</h2>' +
+    '<div class="line"><span>Sisa hari di ' + monthLabel(ui.month) + '</span><span>' + daysLeft + ' hari</span></div>' +
+    '<div class="small muted" style="margin-bottom:4px">Termasuk hari ini. Pengeluaran per hari agar sisanya cukup sampai akhir bulan.</div>' +
+    rows + hint + '</div>';
+}
+
 function chip(label, action, value, active) {
   return '<button class="chip' + (active ? ' active' : '') + '" data-action="' + action + '" data-value="' + value + '">' + label + '</button>';
 }
@@ -315,6 +340,7 @@ function renderHome() {
   const opening = ui.view === 'day' ? balanceBeforeDay(dayKey(ui.day)) : balanceBeforeMonth(ui.month);
   return viewToggle() + (ui.view === 'day' ? daySelector() : monthSelector()) +
     summaryHtml(opening, sum(items, IN), sum(items, OUT)) +
+    (ui.view === 'month' ? projectionCard(opening + sum(items, IN) - sum(items, OUT), sum(items, OUT)) : '') +
     dailyCard() +
     '<div class="toolbar">' +
     '<div class="search"><input id="q" type="search" placeholder="Cari kategori atau catatan" value="' + esc(ui.query) + '" autocomplete="off"></div>' +

@@ -272,3 +272,7 @@ svg.i { width: 24px; height: 24px; display: block; }
 .chart .m.d.sel { color: var(--fg); }
 .line .in { color: var(--in); }
 .line .out { color: var(--out); }
+
+.proj-note { display: block; font-size: 0.75rem; font-weight: 400; color: var(--muted); }
+
+.line.proj span:last-child { white-space: nowrap; }

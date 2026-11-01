@@ -10,7 +10,7 @@ tetap berjalan tanpa internet, dan (opsional) menyinkronkan data ke semua perang
 <table>
   <tr>
     <td align="center"><img src="docs/screenshots/login.png" width="220" alt="Layar masuk"><br><sub>Masuk atau daftar</sub></td>
-    <td align="center"><img src="docs/screenshots/beranda.png" width="220" alt="Beranda"><br><sub>Beranda: saldo, anggaran, batas harian</sub></td>
+    <td align="center"><img src="docs/screenshots/beranda.png" width="220" alt="Beranda"><br><sub>Beranda: saldo, anggaran, sisa hari dan batas harian</sub></td>
     <td align="center"><img src="docs/screenshots/tambah-transaksi.png" width="220" alt="Tambah transaksi"><br><sub>Tambah transaksi dengan peringatan batas harian</sub></td>
   </tr>
   <tr>
@@ -34,6 +34,7 @@ Tangkapan layar memakai data contoh.
 - **Transaksi:** tambah, ubah, hapus. Nominal dengan pemisah ribuan, kategori, tanggal, dan catatan.
 - **Beranda:** pilih tampilan **Bulanan** atau **Harian**, pindah antar bulan atau antar hari, pencarian, filter pemasukan/pengeluaran, riwayat dikelompokkan per hari. Tampilan harian menampilkan progress anggaran harian (dari batas harian, atau otomatis dari anggaran bulanan bila batas harian belum diisi). Pilihan tampilan diingat.
 - **Saldo berlanjut (tidak reset tiap bulan):** saldo akhir sebuah bulan (atau hari) otomatis menjadi saldo awal periode berikutnya. Isi **Saldo awal** di Pengaturan untuk uang yang sudah Anda punya sebelum mulai mencatat. Transaksi lama tidak diubah, hanya cara menghitung saldonya.
+- **Batas harian untuk sisa bulan** (tampilan Bulanan, bulan berjalan): menampilkan sisa hari di bulan itu (termasuk hari ini) dan berapa pengeluaran per hari yang aman, dihitung dari sisa anggaran bulanan dan dari saldo saat ini.
 - **Anggaran bulanan** dengan progress bar yang berubah warna saat mendekati batas.
 - **Batas pengeluaran harian:** kartu "hari ini", petunjuk sisa batas saat mengisi transaksi, peringatan saat melewati batas, dan penanda hari yang melewati batas. Ada saran batas dari anggaran bulanan.
 - **Kategori kustom:** tambah dan hapus kategori sendiri (pengeluaran dan pemasukan) di Pengaturan, maksimal 20 per jenis dan 20 karakter per nama. Tampil di form transaksi sebelum "Lainnya", ikut statistik, dan ikut tersinkron. Menghapus kategori tidak mengubah transaksi lama.
