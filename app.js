@@ -326,7 +326,83 @@ function renderHome() {
     '<div id="list">' + listHtml(items) + '</div>';
 }
 
+function catListHtml(expenses, totalOut, emptyText) {
+  const byCat = {};
+  expenses.forEach((t) => { byCat[t.category] = (byCat[t.category] || 0) + t.amount; });
+  const cats = Object.keys(byCat).map((k) => [k, byCat[k]]).sort((a, b) => b[1] - a[1]);
+  return cats.length ? cats.map(([name, v]) => {
+    const pct = totalOut > 0 ? (v / totalOut) * 100 : 0;
+    return '<div class="cat"><div class="top"><b>' + esc(name) + '</b><span>' + fmtRp(v) + ' (' + Math.round(pct) + '%)</span></div>' +
+      '<div class="progress"><div class="expense" style="width:' + pct + '%"></div></div></div>';
+  }).join('') : '<div class="muted">' + emptyText + '</div>';
+}
+
+const WEEKDAYS_SHORT = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
+
+function renderDayStats() {
+  const key = dayKey(ui.day);
+  const items = dayItems();
+  const expenses = items.filter((t) => t.type === OUT);
+  const totalIn = sum(items, IN);
+  const totalOut = sum(items, OUT);
+  const opening = balanceBeforeDay(key);
+  const biggest = expenses.reduce((m, t) => (!m || t.amount > m.amount ? t : m), null);
+
+  // Rata-rata pengeluaran harian di bulan yang sama (sampai hari ini bila bulan berjalan)
+  const midx = monthIndexOf(ui.day);
+  const monthOut = sum(transactions.filter((t) => monthIndexOf(t.date) === midx), OUT);
+  const counted = midx === currentMonthIndex() ? new Date().getDate() : daysInMonth(midx);
+  const avg = counted > 0 ? Math.floor(monthOut / counted) : 0;
+  let cmp = '-';
+  if (avg > 0) {
+    const diff = Math.round(((totalOut - avg) / avg) * 100);
+    cmp = (diff > 0 ? '+' : '') + diff + '% dari rata-rata (' + fmtRp(avg) + ')';
+  }
+
+  const lim = settings.dailyLimit || 0;
+  let limLine = '';
+  if (lim > 0) {
+    limLine = '<div class="line"><span>Batas harian</span><span class="' + (totalOut > lim ? 'out' : '') + '">' +
+      (totalOut > lim ? 'Melebihi ' + fmtRp(totalOut - lim) : 'Sisa ' + fmtRp(lim - totalOut)) + '</span></div>';
+  }
+
+  // Grafik 7 hari berakhir di hari yang dipilih
+  const series = [];
+  for (let i = 6; i >= 0; i--) {
+    const ms = shiftDay(ui.day, -i);
+    const k = dayKey(ms);
+    const list = transactions.filter((t) => dayKey(t.date) === k);
+    series.push({ ms, k, inc: sum(list, IN), exp: sum(list, OUT) });
+  }
+  const maxV = Math.max(1, ...series.map((x) => Math.max(x.inc, x.exp)));
+  const bar = (v, color) => '<span style="height:' + (v <= 0 ? 2 : Math.max(3, Math.round(100 * v / maxV))) + 'px;background:' + color + '"></span>';
+  const weekExp = series.reduce((a, x) => a + x.exp, 0);
+
+  return viewToggle() + daySelector() + '<div class="stack">' +
+    '<div class="card"><h2>Ringkasan hari</h2>' +
+    '<div class="line"><span>Saldo awal</span><span>' + fmtRp(opening) + '</span></div>' +
+    '<div class="line"><span>Saldo akhir</span><span>' + fmtRp(opening + totalIn - totalOut) + '</span></div>' +
+    '<div class="line"><span>Jumlah transaksi</span><span>' + items.length + '</span></div>' +
+    '<div class="line"><span>Pemasukan</span><span class="in">' + fmtRp(totalIn) + '</span></div>' +
+    '<div class="line"><span>Pengeluaran</span><span class="out">' + fmtRp(totalOut) + '</span></div>' +
+    '<div class="line"><span>Pengeluaran terbesar</span><span>' + (biggest ? esc(biggest.category) + ' • ' + fmtRp(biggest.amount) : '-') + '</span></div>' +
+    '<div class="line"><span>Dibanding rata-rata harian bulan ini</span><span>' + esc(cmp) + '</span></div>' + limLine + '</div>' +
+
+    '<div class="card"><h2>7 hari terakhir</h2>' +
+    '<div class="legend"><span><i style="background:var(--in)"></i>Pemasukan</span><span><i style="background:var(--out)"></i>Pengeluaran</span></div>' +
+    '<div class="chart">' + series.map((x) =>
+      '<div class="col"><div class="bars">' + bar(x.inc, 'var(--in)') + bar(x.exp, 'var(--out)') + '</div>' +
+      '<div class="m' + (x.k === key ? ' sel' : '') + '">' + WEEKDAYS_SHORT[new Date(x.ms).getDay()] + '</div>' +
+      '<div class="m d' + (x.k === key ? ' sel' : '') + '">' + new Date(x.ms).getDate() + '</div></div>'
+    ).join('') + '</div>' +
+    '<div class="line" style="margin-top:12px"><span>Total pengeluaran 7 hari</span><span>' + fmtRp(weekExp) + '</span></div>' +
+    '<div class="line"><span>Rata-rata per hari</span><span>' + fmtRp(Math.floor(weekExp / 7)) + '</span></div></div>' +
+
+    '<div class="card"><h2>Pengeluaran per kategori</h2>' + catListHtml(expenses, totalOut, 'Belum ada pengeluaran di hari ini.') + '</div></div>';
+}
+
 function renderStats() {
+  if (ui.view === 'day') return renderDayStats();
   const items = monthItems();
   const expenses = items.filter((t) => t.type === OUT);
   const totalIn = sum(items, IN);
@@ -358,7 +434,7 @@ function renderStats() {
     overLine = '<div class="line"><span>Hari melebihi batas harian</span><span>' + overDays + ' hari</span></div>';
   }
 
-  return monthSelector() + '<div class="stack">' +
+  return viewToggle() + monthSelector() + '<div class="stack">' +
     '<div class="card"><h2>Ringkasan ' + monthLabel(ui.month) + '</h2>' +
     '<div class="line"><span>Saldo awal bulan</span><span>' + fmtRp(balanceBeforeMonth(ui.month)) + '</span></div>' +
     '<div class="line"><span>Saldo akhir bulan</span><span>' + fmtRp(balanceBeforeMonth(ui.month) + totalIn - totalOut) + '</span></div>' +

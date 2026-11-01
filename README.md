@@ -20,6 +20,9 @@ tetap berjalan tanpa internet, dan (opsional) menyinkronkan data ke semua perang
   </tr>
   <tr>
     <td align="center"><img src="docs/screenshots/harian.png" width="220" alt="Tampilan harian"><br><sub>Tampilan harian: saldo awal/akhir dan progress anggaran harian</sub></td>
+    <td align="center"><img src="docs/screenshots/statistik-harian.png" width="220" alt="Statistik harian"><br><sub>Statistik harian</sub></td>
+  </tr>
+  <tr>
     <td align="center"><img src="docs/screenshots/kategori-kustom.png" width="220" alt="Kategori kustom"><br><sub>Kategori kustom</sub></td>
   </tr>
 </table>
@@ -34,7 +37,7 @@ Tangkapan layar memakai data contoh.
 - **Anggaran bulanan** dengan progress bar yang berubah warna saat mendekati batas.
 - **Batas pengeluaran harian:** kartu "hari ini", petunjuk sisa batas saat mengisi transaksi, peringatan saat melewati batas, dan penanda hari yang melewati batas. Ada saran batas dari anggaran bulanan.
 - **Kategori kustom:** tambah dan hapus kategori sendiri (pengeluaran dan pemasukan) di Pengaturan, maksimal 20 per jenis dan 20 karakter per nama. Tampil di form transaksi sebelum "Lainnya", ikut statistik, dan ikut tersinkron. Menghapus kategori tidak mengubah transaksi lama.
-- **Statistik:** ringkasan bulan, rasio tabungan, jumlah hari melewati batas, grafik 6 bulan, dan pengeluaran per kategori.
+- **Statistik bulanan dan harian:** pilih Bulanan atau Harian. Tampilan harian berisi ringkasan hari (saldo awal/akhir, jumlah transaksi, pengeluaran terbesar, perbandingan dengan rata-rata harian bulan itu, sisa batas harian), grafik 7 hari terakhir, dan pengeluaran per kategori hari itu. Tampilan bulanan: ringkasan bulan, rasio tabungan, jumlah hari melewati batas, grafik 6 bulan, dan pengeluaran per kategori.
 - **Data:** ekspor dan impor CSV (format sama dengan versi Android), bagikan ringkasan bulanan.
 - **Tema:** terang, gelap, atau ikut sistem.
 - **Offline:** semua fitur tetap jalan tanpa internet.
