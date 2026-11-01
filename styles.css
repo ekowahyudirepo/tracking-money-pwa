@@ -276,3 +276,11 @@ svg.i { width: 24px; height: 24px; display: block; }
 .proj-note { display: block; font-size: 0.75rem; font-weight: 400; color: var(--muted); }
 
 .line.proj span:last-child { white-space: nowrap; }
+
+/* ---------- Kelola kategori ---------- */
+.cat-row { display: flex; align-items: center; gap: 2px; padding: 4px 0; border-top: 1px solid var(--border); }
+.cat-row:first-of-type { border-top: 0; }
+.cat-row .grow b { font-weight: 600; }
+.icon-btn.sm { width: 36px; height: 36px; flex: none; }
+.icon-btn.sm svg.i { width: 20px; height: 20px; }
+.icon-sp { width: 36px; flex: none; }

@@ -23,7 +23,7 @@ tetap berjalan tanpa internet, dan (opsional) menyinkronkan data ke semua perang
     <td align="center"><img src="docs/screenshots/statistik-harian.png" width="220" alt="Statistik harian"><br><sub>Statistik harian</sub></td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/screenshots/kategori-kustom.png" width="220" alt="Kategori kustom"><br><sub>Kategori kustom</sub></td>
+    <td align="center"><img src="docs/screenshots/kategori-kustom.png" width="220" alt="Kelola kategori"><br><sub>Kelola kategori</sub></td>
   </tr>
 </table>
 
@@ -37,7 +37,7 @@ Tangkapan layar memakai data contoh.
 - **Batas harian untuk sisa bulan** (tampilan Bulanan, bulan berjalan): menampilkan sisa hari di bulan itu (termasuk hari ini), **rekomendasi anggaran harian** (saldo saat ini dibagi sisa hari), dan saldo cukup untuk berapa hari bila memakai batas harian dari Pengaturan (lengkap dengan tanggal saldo habis).
 - **Anggaran bulanan** dengan progress bar yang berubah warna saat mendekati batas.
 - **Batas pengeluaran harian:** kartu "hari ini", petunjuk sisa batas saat mengisi transaksi, peringatan saat melewati batas, dan penanda hari yang melewati batas. Ada saran batas dari anggaran bulanan.
-- **Kategori kustom:** tambah dan hapus kategori sendiri (pengeluaran dan pemasukan) di Pengaturan, maksimal 20 per jenis dan 20 karakter per nama. Tampil di form transaksi sebelum "Lainnya", ikut statistik, dan ikut tersinkron. Menghapus kategori tidak mengubah transaksi lama.
+- **Kelola kategori (milik akun):** semua kategori, termasuk yang bawaan, bisa ditambah, diubah namanya, diurutkan, atau dihapus (pengeluaran dan pemasukan, minimal satu per jenis, maksimal 30 per jenis dan 20 karakter per nama). Mengubah nama ikut memperbarui transaksi lama; menghapus kategori tidak menghapus transaksi. Ada tombol untuk mengembalikan ke kategori bawaan. Daftar kategori disimpan per akun dan tersinkron antar perangkat; akun lain di perangkat yang sama tidak melihatnya.
 - **Statistik bulanan dan harian:** pilih Bulanan atau Harian. Tampilan harian berisi ringkasan hari (saldo awal/akhir, jumlah transaksi, pengeluaran terbesar, perbandingan dengan rata-rata harian bulan itu, sisa batas harian), grafik 7 hari terakhir, dan pengeluaran per kategori hari itu. Tampilan bulanan: ringkasan bulan, rasio tabungan, jumlah hari melewati batas, grafik 6 bulan, dan pengeluaran per kategori.
 - **Data:** ekspor dan impor CSV (format sama dengan versi Android), bagikan ringkasan bulanan.
 - **Tema:** terang, gelap, atau ikut sistem.
@@ -64,14 +64,14 @@ Aplikasi berjalan dalam mode lokal selama `config.js` kosong. Untuk mengaktifkan
 3. Isi `config.js` dengan **Project URL** dan kunci **anon/publishable**.
 4. Commit dan push. Aplikasi akan menampilkan layar login.
 
-**Database sudah dibuat sebelumnya?** Kategori kustom dan saldo awal butuh dua kolom tambahan. Jalankan di SQL Editor:
+**Database sudah dibuat sebelumnya?** Daftar kategori per akun dan saldo awal butuh dua kolom tambahan (kolom `custom_categories` menyimpan seluruh daftar kategori akun). Jalankan di SQL Editor:
 
 ```sql
 alter table public.user_settings add column if not exists custom_categories jsonb not null default '{}'::jsonb;
 alter table public.user_settings add column if not exists opening_balance bigint not null default 0;
 ```
 
-Tanpa kolom ini aplikasi tetap jalan, hanya kategori kustom dan saldo awal tidak tersinkron antar perangkat.
+Tanpa kolom ini aplikasi tetap jalan, hanya daftar kategori dan saldo awal tidak tersinkron antar perangkat. Data kategori versi lama (kategori tambahan saja) otomatis dimigrasi.
 
 **Cara kerja:** offline-first. Aplikasi selalu membaca dari data di perangkat. Setiap perubahan masuk ke antrean
 dan dikirim saat online, lalu data terbaru ditarik dari server. Perubahan yang belum terkirim tidak tertimpa.

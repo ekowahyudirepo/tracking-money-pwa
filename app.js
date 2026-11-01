@@ -12,7 +12,7 @@ const BASE_CATEGORIES = {
   INCOME: ['Gaji', 'Bonus', 'Usaha', 'Investasi', 'Lainnya']
 };
 
-const MAX_CUSTOM = 20;     // maksimal kategori kustom per jenis
+const MAX_CATS = 30;       // maksimal kategori per jenis
 const MAX_CAT_LEN = 20;    // maksimal panjang nama kategori
 
 const MONTHS = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
@@ -25,6 +25,10 @@ const ICONS = {
   settings: '<g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h9M19 7h1M4 17h1M11 17h9"/><circle cx="16" cy="7" r="2.5"/><circle cx="8" cy="17" r="2.5"/></g>',
   plus: '<path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>',
   left: '<path d="M15 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>',
+  up: '<path d="M6 15l6-6 6 6" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>',
+  down: '<path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>',
+  edit: '<path d="M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+  close: '<path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>',
   right: '<path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>'
 };
 const icon = (name) => '<svg class="i" viewBox="0 0 24 24" aria-hidden="true">' + ICONS[name] + '</svg>';
@@ -66,32 +70,52 @@ function uuid() {
 }
 
 let transactions = store.load('kk.tx', []);
-const defaultSettings = () => ({ budget: 0, dailyLimit: 0, openingBalance: 0, theme: 'system', customCats: { EXPENSE: [], INCOME: [] } });
-let settings = normalizeSettings(Object.assign(defaultSettings(), store.load('kk.settings', {})));
+const defaultCats = () => ({ EXPENSE: BASE_CATEGORIES.EXPENSE.slice(), INCOME: BASE_CATEGORIES.INCOME.slice() });
+const defaultSettings = () => ({ budget: 0, dailyLimit: 0, openingBalance: 0, theme: 'system', cats: defaultCats() });
+let settings = (() => {
+  const stored = store.load('kk.settings', {});
+  const base = defaultSettings();
+  if (!stored.cats) delete base.cats; // data versi lama (customCats) dimigrasi di normalizeSettings
+  const st = normalizeSettings(Object.assign(base, stored));
+  if (Object.keys(stored).length && !stored.cats) store.save('kk.settings', st); // simpan hasil migrasi
+  return st;
+})();
 
 function cleanCatList(list) {
   const out = [];
   (Array.isArray(list) ? list : []).forEach((n) => {
-    const name = String(n || '').trim().slice(0, MAX_CAT_LEN);
+    const name = String(n || '').trim().replace(/\s+/g, ' ').slice(0, MAX_CAT_LEN);
     if (name && !out.some((x) => x.toLowerCase() === name.toLowerCase())) out.push(name);
   });
-  return out.slice(0, MAX_CUSTOM);
+  return out.slice(0, MAX_CATS);
 }
 function normalizeSettings(st) {
   st.openingBalance = Math.max(0, Number(st.openingBalance) || 0);
-  const c = st.customCats || {};
-  st.customCats = { EXPENSE: cleanCatList(c.EXPENSE), INCOME: cleanCatList(c.INCOME) };
+  if (!st.cats) {
+    // Migrasi dari versi lama: kategori bawaan + kategori kustom ("Lainnya" tetap di akhir)
+    const c = st.customCats || {};
+    const merge = (t) => BASE_CATEGORIES[t].filter((x) => x !== 'Lainnya').concat(cleanCatList(c[t])).concat('Lainnya');
+    st.cats = { EXPENSE: merge('EXPENSE'), INCOME: merge('INCOME') };
+  }
+  delete st.customCats;
+  const d = defaultCats();
+  const exp = cleanCatList(st.cats.EXPENSE);
+  const inc = cleanCatList(st.cats.INCOME);
+  st.cats = { EXPENSE: exp.length ? exp : d.EXPENSE, INCOME: inc.length ? inc : d.INCOME };
   return st;
 }
-const hasCustomCats = () => settings.customCats.EXPENSE.length + settings.customCats.INCOME.length > 0;
-const hasSettings = () => settings.budget > 0 || settings.openingBalance > 0 || settings.dailyLimit > 0 || settings.theme !== 'system' || hasCustomCats();
+// Kategori milik akun: dibaca dari kolom custom_categories ({ v: 2, EXPENSE, INCOME }, atau format lama berisi kategori tambahan saja)
+function catsFromServer(obj) {
+  if (obj && obj.v === 2) return normalizeSettings({ cats: { EXPENSE: obj.EXPENSE, INCOME: obj.INCOME } }).cats;
+  return normalizeSettings({ customCats: obj || {} }).cats;
+}
+const catsChanged = () => JSON.stringify(settings.cats) !== JSON.stringify(defaultCats());
+const hasSettings = () => settings.budget > 0 || settings.openingBalance > 0 || settings.dailyLimit > 0 || settings.theme !== 'system' || catsChanged();
 
-// Daftar kategori bawaan + kustom. "Lainnya" selalu di paling akhir.
+// Daftar kategori milik pengguna. `extra` = kategori transaksi lama yang sudah tidak ada di daftar (tetap ditampilkan saat mengubah transaksi).
 function categoriesFor(type, extra) {
-  const base = BASE_CATEGORIES[type].filter((c) => c !== 'Lainnya');
-  const all = base.concat(settings.customCats[type]);
-  if (extra && extra !== 'Lainnya' && !all.some((c) => c.toLowerCase() === extra.toLowerCase())) all.push(extra);
-  all.push('Lainnya');
+  const all = settings.cats[type].slice();
+  if (extra && !all.some((c) => c.toLowerCase() === extra.toLowerCase())) all.push(extra);
   return all;
 }
 const ui = { tab: 'home', view: store.load('kk.view', 'month') === 'day' ? 'day' : 'month', month: currentMonthIndex(), day: Date.now(), filter: 'all', query: '' };
@@ -836,28 +860,69 @@ document.addEventListener('click', (e) => {
       if (!name) { toast('Tulis nama kategori dulu'); break; }
       if (name.length > MAX_CAT_LEN) { toast('Maksimal ' + MAX_CAT_LEN + ' karakter'); break; }
       if (categoriesFor(type).some((c) => c.toLowerCase() === name.toLowerCase())) { toast('Kategori sudah ada'); break; }
-      if (settings.customCats[type].length >= MAX_CUSTOM) { toast('Maksimal ' + MAX_CUSTOM + ' kategori kustom'); break; }
-      settings.customCats[type].push(name);
+      if (settings.cats[type].length >= MAX_CATS) { toast('Maksimal ' + MAX_CATS + ' kategori per jenis'); break; }
+      settings.cats[type].push(name);
       saveSettings();
       render();
       toast('Kategori ditambahkan');
       break;
     }
+    case 'rename-cat': {
+      const type = el.dataset.type === IN ? IN : OUT;
+      const old = el.dataset.value;
+      const input = prompt('Ubah nama kategori "' + old + '". Transaksi lama dengan kategori ini ikut berubah.', old);
+      if (input === null) break;
+      const name = input.trim().replace(/\s+/g, ' ');
+      if (!name) { toast('Nama tidak boleh kosong'); break; }
+      if (name.length > MAX_CAT_LEN) { toast('Maksimal ' + MAX_CAT_LEN + ' karakter'); break; }
+      if (name === old) break;
+      if (settings.cats[type].some((c) => c !== old && c.toLowerCase() === name.toLowerCase())) { toast('Kategori sudah ada'); break; }
+      settings.cats[type] = settings.cats[type].map((c) => (c === old ? name : c));
+      let n = 0;
+      transactions.forEach((t) => {
+        if (t.type === type && t.category === old) { t.category = name; queueUpsert(t.id); n++; }
+      });
+      if (n) saveTx();
+      saveSettings();
+      render();
+      toast('Kategori diubah' + (n ? ' (' + n + ' transaksi ikut diperbarui)' : ''));
+      break;
+    }
+    case 'move-cat': {
+      const type = el.dataset.type === IN ? IN : OUT;
+      const list = settings.cats[type];
+      const i = list.indexOf(el.dataset.value);
+      const j = el.dataset.dir === 'up' ? i - 1 : i + 1;
+      if (i < 0 || j < 0 || j >= list.length) break;
+      [list[i], list[j]] = [list[j], list[i]];
+      saveSettings();
+      render();
+      break;
+    }
     case 'del-cat': {
       const type = el.dataset.type === IN ? IN : OUT;
       const name = el.dataset.value;
+      if (settings.cats[type].length <= 1) { toast('Minimal harus ada satu kategori'); break; }
       const used = transactions.filter((t) => t.type === type && t.category === name).length;
       const msg = used
         ? 'Hapus kategori "' + name + '"? ' + used + ' transaksi lama tetap memakai nama ini, hanya tidak muncul lagi sebagai pilihan.'
         : 'Hapus kategori "' + name + '"?';
       if (confirm(msg)) {
-        settings.customCats[type] = settings.customCats[type].filter((c) => c !== name);
+        settings.cats[type] = settings.cats[type].filter((c) => c !== name);
         saveSettings();
         render();
         toast('Kategori dihapus');
       }
       break;
     }
+    case 'reset-cats':
+      if (confirm('Kembalikan semua kategori ke bawaan? Transaksi tidak berubah.')) {
+        settings.cats = defaultCats();
+        saveSettings();
+        render();
+        toast('Kategori dikembalikan ke bawaan');
+      }
+      break;
     case 'save-daily':
       settings.dailyLimit = parseMoney($('#daily-input').value);
       saveSettings();
@@ -1070,7 +1135,7 @@ async function flushOutbox() {
         user_id: user.id,
         budget: settings.budget || 0,
         daily_limit: settings.dailyLimit || 0,
-        custom_categories: settings.customCats,
+        custom_categories: Object.assign({ v: 2 }, settings.cats),
         opening_balance: settings.openingBalance || 0,
         theme: settings.theme || 'system',
         updated_at: new Date().toISOString()
@@ -1122,9 +1187,8 @@ async function pullAll() {
       settings.budget = Number(srv[0].budget) || 0;
       if ('daily_limit' in srv[0]) settings.dailyLimit = Number(srv[0].daily_limit) || 0;
       if ('opening_balance' in srv[0]) settings.openingBalance = Math.max(0, Number(srv[0].opening_balance) || 0);
-      if (srv[0].custom_categories && typeof srv[0].custom_categories === 'object') {
-        settings.customCats = normalizeSettings({ customCats: srv[0].custom_categories }).customCats;
-      }
+      // Kategori milik akun ini; akun baru (kolom kosong) mendapat kategori bawaan, bukan sisa akun lain
+      if ('custom_categories' in srv[0]) settings.cats = catsFromServer(srv[0].custom_categories);
       settings.theme = srv[0].theme || 'system';
       store.save('kk.settings', settings);
       applyTheme();
@@ -1435,18 +1499,23 @@ function dailyLimitCard() {
 
 function categoryCard() {
   const block = (type, title) => {
-    const list = settings.customCats[type];
+    const list = settings.cats[type];
+    const count = (name) => transactions.filter((t) => t.type === type && t.category === name).length;
+    const btn = (action, ic, label, name, extra) =>
+      '<button class="icon-btn sm" aria-label="' + label + ' ' + esc(name) + '" data-action="' + action + '" data-type="' + type + '" data-value="' + esc(name) + '"' + (extra || '') + '>' + icon(ic) + '</button>';
     return '<div class="field"><span>' + title + '</span>' +
-      (list.length
-        ? '<div class="chips">' + list.map((c) =>
-            '<span class="chip tag">' + esc(c) + '<button class="x" aria-label="Hapus kategori ' + esc(c) + '" data-action="del-cat" data-type="' + type + '" data-value="' + esc(c) + '">&times;</button></span>').join('') + '</div>'
-        : '<div class="small muted">Belum ada kategori kustom.</div>') +
+      list.map((c, i) =>
+        '<div class="cat-row"><span class="grow"><b>' + esc(c) + '</b><small>' + count(c) + ' transaksi</small></span>' +
+        (i > 0 ? btn('move-cat', 'up', 'Naikkan', c, ' data-dir="up"') : '<span class="icon-sp"></span>') +
+        (i < list.length - 1 ? btn('move-cat', 'down', 'Turunkan', c, ' data-dir="down"') : '<span class="icon-sp"></span>') +
+        btn('rename-cat', 'edit', 'Ubah nama', c) + btn('del-cat', 'close', 'Hapus', c) + '</div>').join('') +
       '<div class="add-cat"><input class="input" id="newcat-' + type + '" maxlength="' + MAX_CAT_LEN + '" placeholder="Nama kategori baru" autocomplete="off">' +
       '<button class="btn" data-action="add-cat" data-type="' + type + '">Tambah</button></div></div>';
   };
-  return '<div class="card"><h2>Kategori kustom</h2>' +
-    '<div class="muted small">Tambahkan kategori sendiri selain bawaan. Kategori muncul di form transaksi dan ikut tersinkron.</div>' +
-    block(OUT, 'Pengeluaran') + block(IN, 'Pemasukan') + '</div>';
+  return '<div class="card"><h2>Kelola kategori</h2>' +
+    '<div class="muted small">Tambah, ubah nama, urutkan, atau hapus semua kategori. Kategori ini milik akunmu sendiri dan ikut tersinkron di perangkat lain. Mengubah nama ikut memperbarui transaksi lama.</div>' +
+    block(OUT, 'Pengeluaran') + block(IN, 'Pemasukan') +
+    '<div style="margin-top:12px"><button class="btn outline block" data-action="reset-cats">Kembalikan ke kategori bawaan</button></div></div>';
 }
 
 /* ---------- Mulai ---------- */
