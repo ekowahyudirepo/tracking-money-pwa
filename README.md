@@ -19,7 +19,7 @@ tetap berjalan tanpa internet, dan (opsional) menyinkronkan data ke semua perang
     <td align="center"><img src="docs/screenshots/mode-gelap.png" width="220" alt="Mode gelap"><br><sub>Mode gelap</sub></td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/screenshots/harian.png" width="220" alt="Tampilan harian"><br><sub>Tampilan harian dengan saldo awal dan akhir</sub></td>
+    <td align="center"><img src="docs/screenshots/harian.png" width="220" alt="Tampilan harian"><br><sub>Tampilan harian: saldo awal/akhir dan progress anggaran harian</sub></td>
     <td align="center"><img src="docs/screenshots/kategori-kustom.png" width="220" alt="Kategori kustom"><br><sub>Kategori kustom</sub></td>
   </tr>
 </table>
@@ -29,7 +29,7 @@ Tangkapan layar memakai data contoh.
 ## Fitur
 
 - **Transaksi:** tambah, ubah, hapus. Nominal dengan pemisah ribuan, kategori, tanggal, dan catatan.
-- **Beranda:** pilih tampilan **Bulanan** atau **Harian**, pindah antar bulan atau antar hari, pencarian, filter pemasukan/pengeluaran, riwayat dikelompokkan per hari. Pilihan tampilan diingat.
+- **Beranda:** pilih tampilan **Bulanan** atau **Harian**, pindah antar bulan atau antar hari, pencarian, filter pemasukan/pengeluaran, riwayat dikelompokkan per hari. Tampilan harian menampilkan progress anggaran harian (dari batas harian, atau otomatis dari anggaran bulanan bila batas harian belum diisi). Pilihan tampilan diingat.
 - **Saldo berlanjut (tidak reset tiap bulan):** saldo akhir sebuah bulan (atau hari) otomatis menjadi saldo awal periode berikutnya. Isi **Saldo awal** di Pengaturan untuk uang yang sudah Anda punya sebelum mulai mencatat. Transaksi lama tidak diubah, hanya cara menghitung saldonya.
 - **Anggaran bulanan** dengan progress bar yang berubah warna saat mendekati batas.
 - **Batas pengeluaran harian:** kartu "hari ini", petunjuk sisa batas saat mengisi transaksi, peringatan saat melewati batas, dan penanda hari yang melewati batas. Ada saran batas dari anggaran bulanan.

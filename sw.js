@@ -1,7 +1,7 @@
 // Service worker: aplikasi bisa dibuka offline.
 // Strategi: ambil versi terbaru dari jaringan (maks. 4 detik); jika offline atau lambat,
 // pakai salinan di cache. Dengan begitu pembaruan langsung terlihat saat online.
-const CACHE = 'keuanganku-v6';
+const CACHE = 'keuanganku-v7';
 const ASSETS = [
   './',
   'index.html',

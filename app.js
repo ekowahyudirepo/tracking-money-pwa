@@ -238,19 +238,28 @@ function summaryHtml(opening, income, expense) {
   const closing = opening + income - expense;
   const period = day ? 'hari ini' : 'bulan ini';
   let extra = '';
-  if (!day) {
-    const budget = settings.budget || 0;
-    if (budget > 0) {
-      const ratio = expense / budget;
-      const cls = ratio >= 1 ? 'over' : ratio >= 0.8 ? 'warn' : '';
-      extra =
-        '<div class="budget">' +
-        '<div class="row-between"><span>Anggaran pengeluaran</span><span>' + fmtCompact(expense) + ' / ' + fmtCompact(budget) + '</span></div>' +
-        '<div class="progress"><div class="' + cls + '" style="width:' + Math.min(100, Math.max(0, ratio * 100)) + '%"></div></div>' +
-        '<div class="small" style="margin-top:4px;font-weight:600">' +
-        (expense <= budget ? 'Sisa ' + fmtRp(budget - expense) : 'Melebihi anggaran ' + fmtRp(expense - budget)) +
-        '</div></div>';
+  // Bulanan: anggaran bulanan. Harian: batas harian; jika belum diisi, turunan dari anggaran bulanan.
+  let cap = 0, capTitle = 'Anggaran pengeluaran', capNote = '';
+  if (day) {
+    capTitle = 'Anggaran harian';
+    if (settings.dailyLimit > 0) cap = settings.dailyLimit;
+    else if (settings.budget > 0) {
+      cap = Math.floor(settings.budget / daysInMonth(monthIndexOf(ui.day)));
+      capNote = ' (dari anggaran bulanan)';
     }
+  } else {
+    cap = settings.budget || 0;
+  }
+  if (cap > 0) {
+    const ratio = expense / cap;
+    const cls = ratio >= 1 ? 'over' : ratio >= 0.8 ? 'warn' : '';
+    extra =
+      '<div class="budget">' +
+      '<div class="row-between"><span>' + capTitle + capNote + '</span><span>' + fmtCompact(expense) + ' / ' + fmtCompact(cap) + '</span></div>' +
+      '<div class="progress"><div class="' + cls + '" style="width:' + Math.min(100, Math.max(0, ratio * 100)) + '%"></div></div>' +
+      '<div class="small" style="margin-top:4px;font-weight:600">' +
+      (expense <= cap ? 'Sisa ' + fmtRp(cap - expense) : 'Melebihi anggaran ' + fmtRp(expense - cap)) +
+      '</div></div>';
   }
   const title = day ? 'Saldo akhir ' + new Date(ui.day).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })
                     : 'Saldo akhir ' + monthLabel(ui.month);
@@ -1261,8 +1270,9 @@ function dayExpense(key, excludeId) {
 // Kartu batas harian di Beranda: tampilan harian = hari yang dipilih; bulanan = hanya bulan berjalan
 function dailyCard() {
   const lim = settings.dailyLimit || 0;
-  const dayView = ui.view === 'day';
-  if (!lim || (!dayView && ui.month !== currentMonthIndex())) return '';
+  if (ui.view === 'day') return '';
+  const dayView = false;
+  if (!lim || ui.month !== currentMonthIndex()) return '';
   const key = dayView ? dayKey(ui.day) : dayKey(Date.now());
   const isToday = key === dayKey(Date.now());
   const when = isToday ? 'hari ini' : 'tanggal ' + new Date(dayView ? ui.day : Date.now()).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
